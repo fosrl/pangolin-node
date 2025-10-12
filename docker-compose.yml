@@ -1,0 +1,29 @@
+services:
+  # Development application service
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: dev_pangolin
+    ports:
+      - "3000:3000"
+      - "3001:3001"
+      - "3002:3002"
+      - "3003:3003"
+    environment:
+      - NODE_ENV=development
+      - ENVIRONMENT=dev
+    volumes:
+      # Mount source code for hot reload
+      - ./src:/app/src
+      - ./server:/app/server
+      - ./public:/app/public
+      - ./messages:/app/messages
+      - ./components.json:/app/components.json
+      - ./next.config.mjs:/app/next.config.mjs
+      - ./tsconfig.json:/app/tsconfig.json
+      - ./tailwind.config.js:/app/tailwind.config.js
+      - ./postcss.config.mjs:/app/postcss.config.mjs
+      - ./eslint.config.js:/app/eslint.config.js
+      - ./config:/app/config
+    restart: no

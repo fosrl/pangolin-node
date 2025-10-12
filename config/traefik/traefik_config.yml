@@ -1,0 +1,34 @@
+api:
+  insecure: true
+  dashboard: true
+
+providers:
+  file:
+    directory: "/var/dynamic"
+    watch: true
+
+experimental:
+  plugins:
+    badger:
+      moduleName: "github.com/fosrl/badger"
+      version: "v1.2.0"
+
+log:
+  level: "DEBUG"
+  format: "common"
+  maxSize: 100
+  maxBackups: 3
+  maxAge: 3
+  compress: true
+
+entryPoints:
+  web:
+    address: ":80"
+  websecure:
+    address: ":9443"
+    transport:
+      respondingTimeouts:
+        readTimeout: "30m"
+
+serversTransport:
+  insecureSkipVerify: true

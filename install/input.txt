@@ -1,0 +1,14 @@
+docker
+example.com
+pangolin.example.com
+yes
+admin@example.com
+yes
+admin@example.com
+Password123!
+Password123!
+yes
+no
+no
+no
+yes

@@ -1,0 +1,28 @@
+# To see all available options, please visit the docs:
+# https://docs.digpangolin.com/self-host/advanced/config-file
+
+app:
+  dashboard_url: http://localhost:3002
+  log_level: debug
+
+domains:
+  domain1:
+    base_domain: example.com
+
+server:
+  secret: my_secret_key
+
+gerbil:
+  base_endpoint: example.com
+
+orgs:
+  block_size: 24
+  subnet_group: 100.90.137.0/20
+
+flags:
+  require_email_verification: false
+  disable_signup_without_invite: true
+  disable_user_create_org: true
+  allow_raw_resources: true
+  enable_integration_api: true
+  enable_clients: true

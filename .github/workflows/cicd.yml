@@ -1,0 +1,78 @@
+name: CI/CD Pipeline
+
+on:
+    push:
+        tags:
+            - "[0-9]+.[0-9]+.[0-9]+"
+
+jobs:
+    release:
+        name: Build and Release
+        runs-on: ubuntu-latest
+
+        steps:
+            - name: Checkout code
+              uses: actions/checkout@v5
+
+            - name: Set up Docker Buildx
+              uses: docker/setup-buildx-action@v3
+
+            - name: Log in to Docker Hub
+              uses: docker/login-action@v3
+              with:
+                  username: ${{ secrets.DOCKER_HUB_USERNAME }}
+                  password: ${{ secrets.DOCKER_HUB_ACCESS_TOKEN }}
+
+            - name: Extract tag name
+              id: get-tag
+              run: echo "TAG=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
+
+            - name: Install Go
+              uses: actions/setup-go@v6
+              with:
+                  go-version: 1.24
+
+            - name: Update version in package.json
+              run: |
+                  TAG=${{ env.TAG }}
+                  sed -i "s/export const APP_VERSION = \".*\";/export const APP_VERSION = \"$TAG\";/" server/lib/consts.ts
+                  cat server/lib/consts.ts
+
+            - name: Pull latest Gerbil version
+              id: get-gerbil-tag
+              run: |
+                  LATEST_TAG=$(curl -s https://api.github.com/repos/fosrl/gerbil/tags | jq -r '.[0].name')
+                  echo "LATEST_GERBIL_TAG=$LATEST_TAG" >> $GITHUB_ENV
+
+            - name: Pull latest Badger version
+              id: get-badger-tag
+              run: |
+                  LATEST_TAG=$(curl -s https://api.github.com/repos/fosrl/badger/tags | jq -r '.[0].name')
+                  echo "LATEST_BADGER_TAG=$LATEST_TAG" >> $GITHUB_ENV
+
+            - name: Update install/main.go
+              run: |
+                  PANGOLIN_VERSION=${{ env.TAG }}
+                  GERBIL_VERSION=${{ env.LATEST_GERBIL_TAG }}
+                  BADGER_VERSION=${{ env.LATEST_BADGER_TAG }}
+                  sed -i "s/config.PangolinVersion = \".*\"/config.PangolinVersion = \"$PANGOLIN_VERSION\"/" install/main.go
+                  sed -i "s/config.GerbilVersion = \".*\"/config.GerbilVersion = \"$GERBIL_VERSION\"/" install/main.go
+                  sed -i "s/config.BadgerVersion = \".*\"/config.BadgerVersion = \"$BADGER_VERSION\"/" install/main.go
+                  echo "Updated install/main.go with Pangolin version $PANGOLIN_VERSION, Gerbil version $GERBIL_VERSION, and Badger version $BADGER_VERSION"
+                  cat install/main.go
+
+            - name: Build installer
+              working-directory: install
+              run: |
+                  make go-build-release 
+
+            - name: Upload artifacts from /install/bin
+              uses: actions/upload-artifact@v4
+              with:
+                  name: install-bin
+                  path: install/bin/
+
+            - name: Build and push Docker images
+              run: |
+                  TAG=${{ env.TAG }}
+                  make build-release tag=$TAG
