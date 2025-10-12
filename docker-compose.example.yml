@@ -1,8 +1,8 @@
 name: pangolin
 services:
   pangolin:
-    image: fosrl/remote-node:latest
-    container_name: remote-node
+    image: fosrl/pangolin-node:latest
+    container_name: pangolin-node
     restart: unless-stopped
     volumes:
       - ./config:/app/config

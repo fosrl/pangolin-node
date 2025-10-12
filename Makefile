@@ -10,14 +10,14 @@ build-release:
 	docker buildx build \
 		--build-arg DATABASE=sqlite \
 		--platform linux/arm64,linux/amd64 \
-		--tag fosrl/remote-node:latest \
-		--tag fosrl/remote-node:$(major_tag) \
-		--tag fosrl/remote-node:$(minor_tag) \
-		--tag fosrl/remote-node:$(tag) \
+		--tag fosrl/pangolin-node:latest \
+		--tag fosrl/pangolin-node:$(major_tag) \
+		--tag fosrl/pangolin-node:$(minor_tag) \
+		--tag fosrl/pangolin-node:$(tag) \
 		--push .
 
 test:
-	docker run -it -p 3001:3001 -p 3002:3002 -v ./config:/app/config fosrl/remote-node:latest
+	docker run -it -p 3001:3001 -p 3002:3002 -v ./config:/app/config fosrl/pangolin-node:latest
 
 clean:
-	docker rmi remote-node
+	docker rmi pangolin-node
