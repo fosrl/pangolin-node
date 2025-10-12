@@ -1,8 +1,4 @@
-import { cleanup as wsCleanup } from "@server/routers/ws";
-
 async function cleanup() {
-    await wsCleanup();
-
     process.exit(0);
 }
 

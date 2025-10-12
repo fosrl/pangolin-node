@@ -5,9 +5,9 @@ import { tokenManager } from "@server/lib/tokenManager";
 import { ResourceSession } from "@server/lib/types";
 
 export const SESSION_COOKIE_NAME =
-    config.getRawConfig().server.session_cookie_name;
+    config.getRemoteConfig().session_cookie_name;
 export const SESSION_COOKIE_EXPIRES =
-    1000 * 60 * 60 * config.getRawConfig().server.resource_session_length_hours;
+    1000 * 60 * 60 * config.getRemoteConfig().resource_session_length_hours;
 
 export async function validateResourceSessionToken(
     token: string,

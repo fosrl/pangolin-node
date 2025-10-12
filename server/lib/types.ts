@@ -84,3 +84,15 @@ export type ResourceSession = {
     isRequestToken: boolean;
     userSessionId: string | null;
 };
+
+export type ResourceAccessToken = {
+    accessTokenId: string;
+    orgId: string;
+    resourceId: number;
+    tokenHash: string;
+    sessionLength: number;
+    expiresAt: number | null;
+    title: string | null;
+    description: string | null;
+    createdAt: number;
+};

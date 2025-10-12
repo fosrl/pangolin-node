@@ -1,15 +1,8 @@
-import { db } from "@server/db";
-import {
-    Resource,
-    ResourceAccessToken,
-    resourceAccessToken,
-    resources
-} from "@server/db";
-import { and, eq } from "drizzle-orm";
-import { isWithinExpirationDate } from "oslo";
-import { verifyPassword } from "./password";
-import { encodeHexLowerCase } from "@oslojs/encoding";
-import { sha256 } from "@oslojs/crypto/sha2";
+import { tokenManager } from "@server/lib/tokenManager";
+import logger from "@server/logger";
+import axios from "axios";
+import config from "@server/lib/config";
+import { Resource, ResourceAccessToken } from "@server/lib/types";
 
 export async function verifyResourceAccessToken({
     accessToken,
@@ -25,93 +18,36 @@ export async function verifyResourceAccessToken({
     tokenItem?: ResourceAccessToken;
     resource?: Resource;
 }> {
-    const accessTokenHash = encodeHexLowerCase(
-        sha256(new TextEncoder().encode(accessToken))
-    );
-
-    let tokenItem: ResourceAccessToken | undefined;
-    let resource: Resource | undefined;
-
-    if (!accessTokenId) {
-        const [res] = await db
-            .select()
-            .from(resourceAccessToken)
-            .where(and(eq(resourceAccessToken.tokenHash, accessTokenHash)))
-            .innerJoin(
-                resources,
-                eq(resourceAccessToken.resourceId, resources.resourceId)
-            );
-
-        tokenItem = res?.resourceAccessToken;
-        resource = res?.resources;
-    } else {
-        const [res] = await db
-            .select()
-            .from(resourceAccessToken)
-            .where(and(eq(resourceAccessToken.accessTokenId, accessTokenId)))
-            .innerJoin(
-                resources,
-                eq(resourceAccessToken.resourceId, resources.resourceId)
-            );
-
-        if (res && res.resourceAccessToken) {
-            if (res.resourceAccessToken.tokenHash?.startsWith("$argon")) {
-                const validCode = await verifyPassword(
-                    accessToken,
-                    res.resourceAccessToken.tokenHash
-                );
-
-                if (!validCode) {
-                    return {
-                        valid: false,
-                        error: "Invalid access token"
-                    };
+    try {
+        const response = await axios.post(
+            `${config.getRawConfig().managed?.endpoint}/api/v1/hybrid/resource/access-token/verify`,
+            {
+                accessToken: accessToken,
+                accessTokenId: accessTokenId,
+                resourceId: resourceId
+            },
+            await tokenManager.getAuthHeader()
+        );
+        return response.data.data;
+    } catch (error) {
+        if (axios.isAxiosError(error)) {
+            logger.error(
+                "Error validating resource session token in hybrid mode:",
+                {
+                    message: error.message,
+                    code: error.code,
+                    status: error.response?.status,
+                    statusText: error.response?.statusText,
+                    url: error.config?.url,
+                    method: error.config?.method
                 }
-            } else {
-                const tokenHash = encodeHexLowerCase(
-                    sha256(new TextEncoder().encode(accessToken))
-                );
-
-                if (res.resourceAccessToken.tokenHash !== tokenHash) {
-                    return {
-                        valid: false,
-                        error: "Invalid access token"
-                    };
-                }
-            }
+            );
+        } else {
+            logger.error(
+                "Error validating resource session token in hybrid mode:",
+                error
+            );
         }
-
-        tokenItem = res?.resourceAccessToken;
-        resource = res?.resources;
+        return { valid: false };
     }
-
-    if (!tokenItem || !resource) {
-        return {
-            valid: false,
-            error: "Access token does not exist for resource"
-        };
-    }
-
-    if (
-        tokenItem.expiresAt &&
-        !isWithinExpirationDate(new Date(tokenItem.expiresAt))
-    ) {
-        return {
-            valid: false,
-            error: "Access token has expired"
-        };
-    }
-
-    if (resourceId && resource.resourceId !== resourceId) {
-        return {
-            valid: false,
-            error: "Resource ID does not match"
-        };
-    }
-
-    return {
-        valid: true,
-        tokenItem,
-        resource
-    };
 }

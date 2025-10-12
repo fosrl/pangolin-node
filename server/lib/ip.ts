@@ -1,5 +1,3 @@
-import { db } from "@server/db";
-import { clients, orgs, sites } from "@server/db";
 import { and, eq, isNotNull } from "drizzle-orm";
 import config from "@server/lib/config";
 
@@ -233,70 +231,4 @@ export function isIpInCidr(ip: string, cidr: string): boolean {
     const ipBigInt = ipToBigInt(ip);
     const range = cidrToRange(cidr);
     return ipBigInt >= range.start && ipBigInt <= range.end;
-}
-
-export async function getNextAvailableClientSubnet(
-    orgId: string
-): Promise<string> {
-    const [org] = await db.select().from(orgs).where(eq(orgs.orgId, orgId));
-
-    if (!org) {
-        throw new Error(`Organization with ID ${orgId} not found`);
-    }
-
-    if (!org.subnet) {
-        throw new Error(`Organization with ID ${orgId} has no subnet defined`);
-    }
-
-    const existingAddressesSites = await db
-        .select({
-            address: sites.address
-        })
-        .from(sites)
-        .where(and(isNotNull(sites.address), eq(sites.orgId, orgId)));
-
-    const existingAddressesClients = await db
-        .select({
-            address: clients.subnet
-        })
-        .from(clients)
-        .where(and(isNotNull(clients.subnet), eq(clients.orgId, orgId)));
-
-    const addresses = [
-        ...existingAddressesSites.map(
-            (site) => `${site.address?.split("/")[0]}/32`
-        ), // we are overriding the 32 so that we pick individual addresses in the subnet of the org for the site and the client even though they are stored with the /block_size of the org
-        ...existingAddressesClients.map(
-            (client) => `${client.address.split("/")}/32`
-        )
-    ].filter((address) => address !== null) as string[];
-
-    const subnet = findNextAvailableCidr(addresses, 32, org.subnet); // pick the sites address in the org
-    if (!subnet) {
-        throw new Error("No available subnets remaining in space");
-    }
-
-    return subnet;
-}
-
-export async function getNextAvailableOrgSubnet(): Promise<string> {
-    const existingAddresses = await db
-        .select({
-            subnet: orgs.subnet
-        })
-        .from(orgs)
-        .where(isNotNull(orgs.subnet));
-
-    const addresses = existingAddresses.map((org) => org.subnet!);
-
-    const subnet = findNextAvailableCidr(
-        addresses,
-        config.getRawConfig().orgs.block_size,
-        config.getRawConfig().orgs.subnet_group
-    );
-    if (!subnet) {
-        throw new Error("No available subnets remaining in space");
-    }
-
-    return subnet;
 }

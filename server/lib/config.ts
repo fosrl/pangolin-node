@@ -15,6 +15,7 @@ export type RemoteConfifg = {
     };
     resource_session_request_param: string;
     require_email_verification: boolean;
+    resource_session_length_hours: number;
 };
 
 export class Config {

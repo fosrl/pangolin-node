@@ -1,5 +1,4 @@
 import { validateResourceSessionToken } from "@server/auth/sessions/resource";
-import { verifyResourceAccessToken } from "@server/auth/verifyResourceAccessToken";
 import {
     getResourceByDomain,
     getResourceRules,
@@ -8,7 +7,7 @@ import {
     getUserResourceAccess,
     getOrgLoginPage,
     getUserSessionWithUser
-} from "../ws/verifySessionQueries";
+} from "@server/routers/ws/verifySessionQueries";
 import config from "@server/lib/config";
 import { isIpInCidr } from "@server/lib/ip";
 import { response } from "@server/lib/response";
@@ -28,6 +27,7 @@ import {
     ResourcePincode,
     ResourceRule
 } from "@server/lib/types";
+import { verifyResourceAccessToken } from "@server/auth/verifyResourceAccessToken";
 
 // We'll see if this speeds anything up
 const cache = new NodeCache({

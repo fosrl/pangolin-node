@@ -11,22 +11,24 @@ const getEnvOrYaml = (envVar: string) => (valFromYaml: any) => {
 
 export const configSchema = z.object({
     app: z.object({
-        log_level: z
-            .enum(["error", "warn", "info", "http", "verbose", "debug", "silly"])
-            .default("info"),
-                    log_failed_attempts: z.boolean().optional().default(false),
+        log_level: z.enum(["debug", "info", "warn", "error"]).default("info"),
+        log_failed_attempts: z.boolean().optional().default(false)
     }),
-    managed: z
+    server: z
         .object({
-            name: z.string().optional(),
-            id: z.string().optional(),
-            secret: z.string().optional(),
-            endpoint: z
-                .string()
-                .optional()
-                .default("https://pangolin.fossorial.io"),
-            redirect_endpoint: z.string().optional()
-        }),
+            internal_port: portSchema.default(3001)
+        })
+        .default({}),
+    managed: z.object({
+        name: z.string().optional(),
+        id: z.string().optional(),
+        secret: z.string().optional(),
+        endpoint: z
+            .string()
+            .optional()
+            .default("https://pangolin.fossorial.io"),
+        redirect_endpoint: z.string().optional()
+    }),
     traefik: z
         .object({
             certificates_path: z.string().default("/var/certificates"),
@@ -42,11 +44,10 @@ export const configSchema = z.object({
         })
         .optional()
         .default({}),
-    gerbil: z
-        .object({
-            endpoint: z.string(),
-            reachable_at: z.string().optional().default("http://gerbil:3001")
-        })
+    gerbil: z.object({
+        endpoint: z.string(),
+        reachable_at: z.string().optional().default("http://gerbil:3003")
+    })
 });
 
 export function readConfigFile() {

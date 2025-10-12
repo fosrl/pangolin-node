@@ -9,7 +9,6 @@ import {
     notFoundMiddleware
 } from "@server/middlewares";
 import { internalRouter } from "#dynamic/routers/internal";
-import { stripDuplicateSesions } from "./middlewares/stripDuplicateSessions";
 
 const internalPort = config.getRawConfig().server.internal_port;
 
@@ -18,7 +17,6 @@ export function createInternalServer() {
 
     internalServer.use(helmet());
     internalServer.use(cors());
-    internalServer.use(stripDuplicateSesions);
     internalServer.use(cookieParser());
     internalServer.use(express.json());
 
