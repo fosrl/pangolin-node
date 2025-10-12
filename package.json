@@ -32,6 +32,7 @@
         "db:sqlite:seed-exit-node": "sqlite3 config/db/db.sqlite \"INSERT INTO exitNodes (exitNodeId, name, address, endpoint, publicKey, listenPort, reachableAt, maxConnections, online, lastPing, type, region) VALUES (null, 'test', '10.0.0.1/24', 'localhost', 'MJ44MpnWGxMZURgxW/fWXDFsejhabnEFYDo60LQwK3A=', 1234, 'http://localhost:3003', 123, 1, null, 'gerbil', null);\""
     },
     "dependencies": {
+        "@node-rs/argon2": "2.0.2",
         "@simplewebauthn/browser": "^13.2.2",
         "@simplewebauthn/server": "^13.2.2",
         "@tailwindcss/forms": "^0.5.10",

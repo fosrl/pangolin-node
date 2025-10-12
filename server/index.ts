@@ -1,6 +1,4 @@
 #! /usr/bin/env node
-import "./extendZod.ts";
-
 import { createInternalServer } from "./internalServer";
 import { createHybridClientServer } from "./hybridServer";
 import { initCleanup } from "@server/cleanup";
