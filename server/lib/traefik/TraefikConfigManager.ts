@@ -5,10 +5,8 @@ import logger from "@server/logger";
 import * as yaml from "js-yaml";
 import axios from "axios";
 import { tokenManager } from "../tokenManager";
-import {
-    getValidCertificatesForDomainsHybrid
-} from "#dynamic/lib/certificates";
-import { sendToExitNode } from "#dynamic/lib/exitNodes";
+import { getValidCertificatesForDomainsHybrid } from "@server/lib/certificates";
+import { sendToExitNode } from "@server/lib/exitNodes";
 
 export class TraefikConfigManager {
     private intervalId: NodeJS.Timeout | null = null;
@@ -391,15 +389,11 @@ export class TraefikConfigManager {
             await this.writeTraefikDynamicConfig(traefikConfig);
 
             // Send domains to SNI proxy
-            try {
-                await sendToExitNode({
-                    localPath: "/update-local-snis",
-                    method: "POST",
-                    data: { fullDomains: Array.from(domains) }
-                });
-            } catch (err) {
-                logger.error("Failed to post domains to SNI proxy:", err);
-            }
+            await sendToExitNode({
+                localPath: "/update-local-snis",
+                method: "POST",
+                data: { fullDomains: Array.from(domains) }
+            });
 
             // Update active domains tracking
             this.activeDomains = domains;

@@ -74,6 +74,5 @@ export async function sendToExitNode(
                 `Error making ${method} request for exit node at ${config.getRawConfig().gerbil.reachable_at}: ${error}`
             );
         }
-        throw error;
     }
 }

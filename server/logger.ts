@@ -1,8 +1,6 @@
 import "winston-daily-rotate-file";
 import config from "@server/lib/config";
 import * as winston from "winston";
-import path from "path";
-import { APP_PATH } from "./lib/consts";
 
 // helper to get ISO8601 string in the TZ from process.env.TZ
 // This replaces the default Z (UTC) with the local offset from process.env.TZ

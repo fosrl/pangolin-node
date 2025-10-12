@@ -13,7 +13,7 @@ export async function createHybridClientServer() {
     await tokenManager.start();
 
     const token = await tokenManager.getToken();
-    await config.fetchRemoteConfig();
+    await config.fetchRemoteConfig(token);
 
     const monitor = new TraefikConfigManager();
 

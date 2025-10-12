@@ -13,7 +13,7 @@ export const configSchema = z.object({
     app: z.object({
         log_level: z.enum(["debug", "info", "warn", "error"]).default("info"),
         log_failed_attempts: z.boolean().optional().default(false)
-    }),
+    }).default({}),
     server: z
         .object({
             internal_port: portSchema.default(3001)

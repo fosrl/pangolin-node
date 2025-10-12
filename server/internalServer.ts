@@ -8,7 +8,7 @@ import {
     errorHandlerMiddleware,
     notFoundMiddleware
 } from "@server/middlewares";
-import { internalRouter } from "#dynamic/routers/internal";
+import { internalRouter } from "@server/routers/internal";
 
 const internalPort = config.getRawConfig().server.internal_port;
 

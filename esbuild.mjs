@@ -176,7 +176,7 @@ function dynamicImportSwitcherPlugin(buildValue) {
             });
 
             build.onResolve({ filter: /^#dynamic\// }, (args) => {
-                // Extract the path after #dynamic/
+                // Extract the path after @server/
                 const dynamicPath = args.path.replace(/^#dynamic\//, '');
 
                 // Determine the replacement based on build type

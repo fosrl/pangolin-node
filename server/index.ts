@@ -3,11 +3,11 @@ import "./extendZod.ts";
 
 import { createInternalServer } from "./internalServer";
 import { createHybridClientServer } from "./hybridServer";
-import config from "@server/lib/config";
-import { initCleanup } from "#dynamic/cleanup";
+import { initCleanup } from "@server/cleanup";
+import { config } from "@server/lib/config";
 
 async function startServers() {
-    await config.initServer();
+    config.getRawConfig(); // Ensure config is loaded
 
     // Start all servers
     const internalServer = createInternalServer();
