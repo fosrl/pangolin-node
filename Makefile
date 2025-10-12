@@ -1,4 +1,4 @@
-.PHONY: build build-pg build-release build-arm build-x86 test clean
+.PHONY: build build-release test clean
 
 major_tag := $(shell echo $(tag) | cut -d. -f1)
 minor_tag := $(shell echo $(tag) | cut -d. -f1,2)
@@ -10,34 +10,14 @@ build-release:
 	docker buildx build \
 		--build-arg DATABASE=sqlite \
 		--platform linux/arm64,linux/amd64 \
-		--tag fosrl/pangolin:latest \
-		--tag fosrl/pangolin:$(major_tag) \
-		--tag fosrl/pangolin:$(minor_tag) \
-		--tag fosrl/pangolin:$(tag) \
+		--tag fosrl/remote-node:latest \
+		--tag fosrl/remote-node:$(major_tag) \
+		--tag fosrl/remote-node:$(minor_tag) \
+		--tag fosrl/remote-node:$(tag) \
 		--push .
-	docker buildx build \
-		--build-arg DATABASE=pg \
-		--platform linux/arm64,linux/amd64 \
-		--tag fosrl/pangolin:postgresql-latest \
-		--tag fosrl/pangolin:postgresql-$(major_tag) \
-		--tag fosrl/pangolin:postgresql-$(minor_tag) \
-		--tag fosrl/pangolin:postgresql-$(tag) \
-		--push .
-
-build-arm:
-	docker buildx build --platform linux/arm64 -t fosrl/pangolin:latest .
-
-build-x86:
-	docker buildx build --platform linux/amd64 -t fosrl/pangolin:latest .
-
-build-sqlite:
-	docker build --build-arg DATABASE=sqlite -t fosrl/pangolin:latest .
-
-build-pg:
-	docker build --build-arg DATABASE=pg -t fosrl/pangolin:postgresql-latest .
 
 test:
-	docker run -it -p 3000:3000 -p 3001:3001 -p 3002:3002 -v ./config:/app/config fosrl/pangolin:latest
+	docker run -it -p 3001:3001 -p 3002:3002 -v ./config:/app/config fosrl/remote-node:latest
 
 clean:
-	docker rmi pangolin
+	docker rmi remote-node

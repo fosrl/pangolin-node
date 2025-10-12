@@ -1,34 +1,3 @@
-Copyright (c) 2025 Fossorial, Inc.
-
-Portions of this software are licensed as follows:
-
-* All files that include a header specifying they are licensed under the
-  "Fossorial Commercial License" are governed by the Fossorial Commercial
-  License terms. The specific terms applicable to each customer depend on the
-  commercial license tier agreed upon in writing with Fossorial, Inc.
-  Unauthorized use, copying, modification, or distribution is strictly
-  prohibited.
-
-* All files that include a header specifying they are licensed under the GNU
-  Affero General Public License, Version 3 ("AGPL-3"), are governed by the
-  AGPL-3 terms. A full copy of the AGPL-3 license is provided below. However,
-  these files are also available under the Fossorial Commercial License if a
-  separate commercial license agreement has been executed between the customer
-  and Fossorial, Inc.
-
-* All files without a license header are, by default, licensed under the GNU
-  Affero General Public License, Version 3 (AGPL-3). These files may also be
-  made available under the Fossorial Commercial License upon agreement with
-  Fossorial, Inc.
-
-* All third-party components included in this repository are licensed under
-  their respective original licenses, as provided by their authors.
-
-Please consult the header of each individual file to determine the applicable
-license. For AGPL-3 licensed files, dual-licensing under the Fossorial
-Commercial License is available subject to written agreement with Fossorial,
-Inc.
-
                     GNU AFFERO GENERAL PUBLIC LICENSE
                        Version 3, 19 November 2007
 

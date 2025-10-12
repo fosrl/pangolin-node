@@ -1,1 +1,1 @@
-# Pangolin Managed
+# Pangolin Remote Node

@@ -1,35 +1,19 @@
 {
-    "name": "@fosrl/pangolin",
+    "name": "@fosrl/remote-node",
     "version": "0.0.0",
     "private": true,
     "type": "module",
-    "description": "Tunneled Reverse Proxy Management Server with Identity and Access Control and Dashboard UI",
-    "homepage": "https://github.com/fosrl/pangolin",
+    "description": "Wrapper for remote pangolin nodes",
+    "homepage": "https://github.com/fosrl/remote-node",
     "repository": {
         "type": "git",
-        "url": "https://github.com/fosrl/pangolin"
+        "url": "https://github.com/fosrl/remote-node"
     },
     "license": "SEE LICENSE IN LICENSE AND README.md",
     "scripts": {
         "dev": "NODE_ENV=development ENVIRONMENT=dev tsx watch server/index.ts",
-        "db:pg:generate": "drizzle-kit generate --config=./drizzle.pg.config.ts",
-        "db:sqlite:generate": "drizzle-kit generate --config=./drizzle.sqlite.config.ts",
-        "db:pg:push": "npx tsx server/db/pg/migrate.ts",
-        "db:sqlite:push": "npx tsx server/db/sqlite/migrate.ts",
-        "db:sqlite:studio": "drizzle-kit studio --config=./drizzle.sqlite.config.ts",
-        "db:pg:studio": "drizzle-kit studio --config=./drizzle.pg.config.ts",
-        "db:clear-migrations": "rm -rf server/migrations",
-        "set:oss": "echo 'export const build = \"oss\" as any;' > server/build.ts",
-        "set:saas": "echo 'export const build = \"saas\" as any;' > server/build.ts",
-        "set:enterprise": "echo 'export const build = \"enterprise\" as any;' > server/build.ts",
-        "set:sqlite": "echo 'export * from \"./sqlite\";' > server/db/index.ts",
-        "set:pg": "echo 'export * from \"./pg\";' > server/db/index.ts",
-        "build:sqlite": "mkdir -p dist && next build && node esbuild.mjs -e server/index.ts -o dist/server.mjs && node esbuild.mjs -e server/setup/migrationsSqlite.ts -o dist/migrations.mjs",
-        "build:pg": "mkdir -p dist && next build && node esbuild.mjs -e server/index.ts -o dist/server.mjs && node esbuild.mjs -e server/setup/migrationsPg.ts -o dist/migrations.mjs",
-        "start": "ENVIRONMENT=prod node dist/migrations.mjs && ENVIRONMENT=prod NODE_ENV=development node --enable-source-maps dist/server.mjs",
-        "email": "email dev --dir server/emails/templates --port 3005",
-        "build:cli": "node esbuild.mjs -e cli/index.ts -o dist/cli.mjs",
-        "db:sqlite:seed-exit-node": "sqlite3 config/db/db.sqlite \"INSERT INTO exitNodes (exitNodeId, name, address, endpoint, publicKey, listenPort, reachableAt, maxConnections, online, lastPing, type, region) VALUES (null, 'test', '10.0.0.1/24', 'localhost', 'MJ44MpnWGxMZURgxW/fWXDFsejhabnEFYDo60LQwK3A=', 1234, 'http://localhost:3003', 123, 1, null, 'gerbil', null);\""
+        "build": "mkdir -p dist && node esbuild.mjs -e server/index.ts -o dist/server.mjs",
+        "start": "ENVIRONMENT=prod node --enable-source-maps dist/server.mjs"
     },
     "dependencies": {
         "@node-rs/argon2": "2.0.2",

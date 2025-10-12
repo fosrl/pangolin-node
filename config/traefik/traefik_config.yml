@@ -25,7 +25,7 @@ entryPoints:
   web:
     address: ":80"
   websecure:
-    address: ":9443"
+    address: ":8443"
     transport:
       respondingTimeouts:
         readTimeout: "30m"
