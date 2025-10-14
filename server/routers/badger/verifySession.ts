@@ -185,11 +185,12 @@ export async function verifyResourceSession(
             // otherwise its undefined and we pass
         }
 
+        // IMPORTANT: ADD NEW AUTH CHECKS HERE OR WHEN TURNING OFF ALL OTHER AUTH METHODS IT WILL JUST PASS
         if (
-            !resource.sso &&
+            !sso &&
             !pincode &&
             !password &&
-            !resource.emailWhitelistEnabled && 
+            !resource.emailWhitelistEnabled &&
             !headerAuth
         ) {
             logger.debug("Resource allowed because no auth");
@@ -299,6 +300,25 @@ export async function verifyResourceSession(
                 cache.set(clientHeaderAuthKey, clientHeaderAuth);
                 logger.debug("Resource allowed because header auth is valid");
                 return allowed(res);
+            }
+
+            if ( // we dont want to redirect if this is the only auth method and we did not pass here
+                !sso &&
+                !pincode &&
+                !password &&
+                !resource.emailWhitelistEnabled
+            ) {
+                return notAllowed(res);
+            }
+        } else if (headerAuth) {
+            // if there are no other auth methods we need to return unauthorized if nothing is provided
+            if (
+                !sso &&
+                !pincode &&
+                !password &&
+                !resource.emailWhitelistEnabled
+            ) {
+                return notAllowed(res);
             }
         }
 
