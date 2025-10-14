@@ -3,4 +3,5 @@ managed:
   secret: "0qe1exin8se0b35thfekfcg7vzie7e1nqmmp78iqhm5wxp5w"
 
 gerbil:
-  endpoint: p.fosrl.io
+  base_endpoint: p.fosrl.io
+  start_port: 51820

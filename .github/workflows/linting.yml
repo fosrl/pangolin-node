@@ -28,8 +28,5 @@ jobs:
             - name: Install dependencies
               run: npm ci
 
-            - name: Create build file
-              run: npm run set:oss
-
             - name: Run ESLint
               run: npx eslint . --ext .js,.jsx,.ts,.tsx

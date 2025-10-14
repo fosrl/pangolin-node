@@ -8,13 +8,15 @@ build-release:
 		exit 1; \
 	fi
 	docker buildx build \
-		--build-arg DATABASE=sqlite \
 		--platform linux/arm64,linux/amd64 \
 		--tag fosrl/pangolin-node:latest \
 		--tag fosrl/pangolin-node:$(major_tag) \
 		--tag fosrl/pangolin-node:$(minor_tag) \
 		--tag fosrl/pangolin-node:$(tag) \
 		--push .
+
+build:
+	docker build -t pangolin-node .
 
 test:
 	docker run -it -p 3001:3001 -p 3002:3002 -v ./config:/app/config fosrl/pangolin-node:latest
