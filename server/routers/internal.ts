@@ -2,6 +2,7 @@ import { Router } from "express";
 import * as badger from "./badger";
 import { proxyToRemote } from "@server/lib/remoteProxy";
 import HttpCode from "@server/types/HttpCode";
+import { config } from "@server/lib/config";
 
 // Root routes
 export const internalRouter = Router();
@@ -32,9 +33,14 @@ gerbilRouter.post("/get-resolved-hostname", (req, res, next) =>
     proxyToRemote(req, res, next, `hybrid/gerbil/get-resolved-hostname`)
 );
 
-gerbilRouter.post("/get-config", (req, res, next) =>
-    proxyToRemote(req, res, next, "hybrid/gerbil/get-config")
-);
+gerbilRouter.post("/get-config", (req, res, next) => {
+    req.body = {
+        ...req.body,
+        endpoint: config.getRawConfig().gerbil.base_endpoint,
+        listenPort: config.getRawConfig().gerbil.start_port
+    };
+    return proxyToRemote(req, res, next, "hybrid/gerbil/get-config");
+});
 
 // Badger routes
 const badgerRouter = Router();

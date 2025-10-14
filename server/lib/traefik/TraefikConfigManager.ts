@@ -260,7 +260,9 @@ export class TraefikConfigManager {
                     (1000 * 60 * 60 * 24);
                 if (daysUntilExpiry < 30) {
                     logger.info(
-                        `Fetching certificates due to upcoming expiry for ${domain} (${Math.round(daysUntilExpiry)} days remaining)`
+                        `Fetching certificates due to upcoming expiry for ${domain} (${Math.round(
+                            daysUntilExpiry
+                        )} days remaining)`
                     );
                     return true;
                 }
@@ -300,7 +302,9 @@ export class TraefikConfigManager {
                 )
             ) {
                 logger.info(
-                    `Active domains changed for exit node: ${Array.from(domains).join(", ")}`
+                    `Active domains changed for exit node: ${Array.from(
+                        domains
+                    ).join(", ")}`
                 );
                 this.lastActiveDomains = new Set(domains);
             }
@@ -348,7 +352,11 @@ export class TraefikConfigManager {
                     this.lastKnownDomains = new Set(domains);
 
                     logger.info(
-                        `Fetched ${validCertificates.length} certificates from remote (${domains.size - domainsToFetch.size} domains covered by wildcards)`
+                        `Fetched ${
+                            validCertificates.length
+                        } certificates from remote (${
+                            domains.size - domainsToFetch.size
+                        } domains covered by wildcards)`
                     );
 
                     // Download and decrypt new certificates
@@ -412,7 +420,9 @@ export class TraefikConfigManager {
         let traefikConfig;
         try {
             const resp = await axios.get(
-                `${config.getRawConfig().managed?.endpoint}/api/v1/hybrid/traefik-config`,
+                `${
+                    config.getRawConfig().managed?.endpoint
+                }/api/v1/hybrid/traefik-config`,
                 await tokenManager.getAuthHeader()
             );
 
@@ -445,6 +455,34 @@ export class TraefikConfigManager {
             // logger.debug(
             //     `Successfully retrieved traefik config: ${JSON.stringify(traefikConfig)}`
             // );
+
+            const badgerMiddlewareName = "badger";
+            if (traefikConfig?.http?.middlewares) {
+                traefikConfig.http.middlewares[badgerMiddlewareName] = {
+                    plugin: {
+                        [badgerMiddlewareName]: {
+                            apiBaseUrl: new URL(
+                                "/api/v1",
+                                `http://${
+                                    config.getRawConfig().server
+                                        .internal_hostname
+                                }:${config.getRawConfig().server.internal_port}`
+                            ).href,
+                            userSessionCookieName:
+                                config.getRemoteConfig().session_cookie_name,
+
+                            // deprecated
+                            accessTokenQueryParam:
+                                config.getRemoteConfig()
+                                    .resource_access_token_param,
+
+                            resourceSessionRequestParam:
+                                config.getRemoteConfig()
+                                    .resource_session_request_param
+                        }
+                    }
+                };
+            }
 
             return { domains, traefikConfig };
         } catch (error) {
@@ -693,7 +731,9 @@ export class TraefikConfigManager {
                     );
 
                     logger.info(
-                        `Certificate updated for domain: ${cert.domain}${cert.wildcard ? " (wildcard)" : ""}`
+                        `Certificate updated for domain: ${cert.domain}${
+                            cert.wildcard ? " (wildcard)" : ""
+                        }`
                     );
 
                     // Update local state tracking

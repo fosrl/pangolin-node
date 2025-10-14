@@ -189,7 +189,8 @@ export async function verifyResourceSession(
             !resource.sso &&
             !pincode &&
             !password &&
-            !resource.emailWhitelistEnabled
+            !resource.emailWhitelistEnabled && 
+            !headerAuth
         ) {
             logger.debug("Resource allowed because no auth");
             return allowed(res);
@@ -282,8 +283,9 @@ export async function verifyResourceSession(
         }
 
         // check for HTTP Basic Auth header
+        const clientHeaderAuthKey = `headerAuth:${clientHeaderAuth}`;
         if (headerAuth && clientHeaderAuth) {
-            if (cache.get(clientHeaderAuth)) {
+            if (cache.get(clientHeaderAuthKey)) {
                 logger.debug(
                     "Resource allowed because header auth is valid (cached)"
                 );
@@ -294,7 +296,7 @@ export async function verifyResourceSession(
                     headerAuth.headerAuthHash
                 )
             ) {
-                cache.set(clientHeaderAuth, clientHeaderAuth);
+                cache.set(clientHeaderAuthKey, clientHeaderAuth);
                 logger.debug("Resource allowed because header auth is valid");
                 return allowed(res);
             }

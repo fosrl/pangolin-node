@@ -10,13 +10,18 @@ const getEnvOrYaml = (envVar: string) => (valFromYaml: any) => {
 };
 
 export const configSchema = z.object({
-    app: z.object({
-        log_level: z.enum(["debug", "info", "warn", "error"]).default("info"),
-        log_failed_attempts: z.boolean().optional().default(false)
-    }).default({}),
+    app: z
+        .object({
+            log_level: z
+                .enum(["debug", "info", "warn", "error"])
+                .default("info"),
+            log_failed_attempts: z.boolean().optional().default(false)
+        })
+        .default({}),
     server: z
         .object({
-            internal_port: portSchema.default(3001)
+            internal_port: portSchema.default(3001),
+            internal_hostname: z.string().optional().default("pangolin"),
         })
         .default({}),
     managed: z.object({
@@ -45,8 +50,9 @@ export const configSchema = z.object({
         .optional()
         .default({}),
     gerbil: z.object({
-        endpoint: z.string(),
-        reachable_at: z.string().optional().default("http://gerbil:3003")
+        base_endpoint: z.string(),
+        reachable_at: z.string().optional().default("http://gerbil:3003"),
+        start_port: portSchema.optional().default(51820)
     })
 });
 

@@ -57,7 +57,7 @@ export async function sendToExitNode(
                 throw new Error(`Unsupported HTTP method: ${method}`);
         }
 
-        logger.info(`Exit node request successful:`, {
+        logger.debug(`Exit node request successful:`, {
             method,
             url,
             status: response.data.status
