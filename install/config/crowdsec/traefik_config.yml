@@ -1,0 +1,81 @@
+api:
+  insecure: true
+  dashboard: true
+
+providers:
+  file:
+    directory: "/var/dynamic"
+    watch: true
+
+experimental:
+  plugins:
+    badger:
+      moduleName: "github.com/fosrl/badger"
+      version: "{{.BadgerVersion}}"
+    crowdsec: # CrowdSec plugin configuration added
+      moduleName: "github.com/maxlerebourg/crowdsec-bouncer-traefik-plugin"
+      version: "v1.4.4"
+
+log:
+  level: "INFO"
+  format: "json" # Log format changed to json for better parsing
+  maxSize: 100
+  maxBackups: 3
+  maxAge: 3
+  compress: true
+
+accessLog: # We enable access logs as json
+  filePath: "/var/log/traefik/access.log"
+  format: json
+  filters:
+    statusCodes:
+      - "200-299"  # Success codes
+      - "400-499"  # Client errors
+      - "500-599"  # Server errors
+    retryAttempts: true
+    minDuration: "100ms"  # Increased to focus on slower requests
+  bufferingSize: 100      # Add buffering for better performance
+  fields:
+    defaultMode: drop     # Start with dropping all fields
+    names:
+      ClientAddr: keep # Keep client address for IP tracking
+      ClientHost: keep  # Keep client host for IP tracking
+      RequestMethod: keep # Keep request method for tracking
+      RequestPath: keep # Keep request path for tracking
+      RequestProtocol: keep # Keep request protocol for tracking
+      DownstreamStatus: keep # Keep downstream status for tracking
+      DownstreamContentSize: keep # Keep downstream content size for tracking
+      Duration: keep # Keep request duration for tracking
+      ServiceName: keep # Keep service name for tracking
+      StartUTC: keep # Keep start time for tracking
+      TLSVersion: keep # Keep TLS version for tracking
+      TLSCipher: keep # Keep TLS cipher for tracking
+      RetryAttempts: keep # Keep retry attempts for tracking
+    headers:
+      defaultMode: drop # Start with dropping all headers
+      names:
+        User-Agent: keep # Keep user agent for tracking
+        X-Real-Ip: keep # Keep real IP for tracking
+        X-Forwarded-For: keep # Keep forwarded IP for tracking
+        X-Forwarded-Proto: keep # Keep forwarded protocol for tracking
+        Content-Type: keep # Keep content type for tracking
+        Authorization: redact  # Redact sensitive information
+        Cookie: redact        # Redact sensitive information
+
+entryPoints:
+  web:
+    address: ":80"
+  websecure:
+    address: ":443"
+    transport:
+      respondingTimeouts:
+        readTimeout: "30m"
+    http:
+      middlewares: 
+        - crowdsec@file
+
+serversTransport:
+  insecureSkipVerify: true
+
+ping:
+  entryPoint: "web"

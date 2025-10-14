@@ -1,0 +1,10 @@
+# To see all available options, please visit the docs:
+# https://docs.digpangolin.com/
+
+gerbil:
+    start_port: 51820
+    base_endpoint: "{{.DashboardDomain}}"
+
+managed:
+    id: "{{.HybridId}}"
+    secret: "{{.HybridSecret}}"

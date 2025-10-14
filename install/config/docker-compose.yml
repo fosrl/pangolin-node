@@ -1,0 +1,63 @@
+name: pangolin
+services:
+  pangolin:
+    image: docker.io/fosrl/pangolin-node:{{.PangolinVersion}}
+    container_name: pangolin
+    restart: unless-stopped
+    volumes:
+      - ./config:/app/config
+      - pangolin-data-certificates:/var/certificates
+      - pangolin-data-dynamic:/var/dynamic
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/api/v1/"]
+      interval: "10s"
+      timeout: "10s"
+      retries: 15
+
+  gerbil:
+    image: docker.io/fosrl/gerbil:{{.GerbilVersion}}
+    container_name: gerbil
+    restart: unless-stopped
+    depends_on:
+      pangolin:
+        condition: service_healthy
+    command:
+      - --reachableAt=http://gerbil:3003
+      - --generateAndSaveKeyTo=/var/config/key
+      - --remoteConfig=http://pangolin:3001/api/v1/
+    volumes:
+      - ./config/:/var/config
+    cap_add:
+      - NET_ADMIN
+      - SYS_MODULE
+    ports:
+      - 51820:51820/udp
+      - 21820:21820/udp
+      - 443:8443
+      - 80:80
+
+  traefik:
+    image: docker.io/traefik:v3.5
+    container_name: traefik
+    restart: unless-stopped
+    network_mode: service:gerbil
+    depends_on:
+      pangolin:
+        condition: service_healthy
+    command:
+      - --configFile=/etc/traefik/traefik_config.yml
+    volumes:
+      - ./config/traefik:/etc/traefik:ro
+      - ./config/traefik/logs:/var/log/traefik
+      - pangolin-data-certificates:/var/certificates:ro
+      - pangolin-data-dynamic:/var/dynamic:ro
+
+networks:
+  default:
+    driver: bridge
+    name: pangolin
+{{if .EnableIPv6}}    enable_ipv6: true{{end}}
+
+volumes:
+  pangolin-data-dynamic:
+  pangolin-data-certificates:

@@ -1,0 +1,55 @@
+http:
+  middlewares:
+    redirect-to-https:
+      redirectScheme:
+        scheme: https
+    default-whitelist: # Whitelist middleware for internal IPs
+      ipWhiteList:  # Internal IP addresses
+        sourceRange:  # Internal IP addresses
+        - "10.0.0.0/8"  # Internal IP addresses
+        - "192.168.0.0/16" # Internal IP addresses
+        - "172.16.0.0/12" # Internal IP addresses
+    # Basic security headers
+    security-headers:
+      headers:
+        customResponseHeaders:  # Custom response headers
+          Server: "" # Remove server header
+          X-Powered-By: "" # Remove powered by header
+          X-Forwarded-Proto: "https"  # Set forwarded proto to https
+        sslProxyHeaders: # SSL proxy headers
+          X-Forwarded-Proto: "https" # Set forwarded proto to https
+        hostsProxyHeaders: # Hosts proxy headers
+          - "X-Forwarded-Host" # Set forwarded host
+        contentTypeNosniff: true # Prevent MIME sniffing
+        customFrameOptionsValue: "SAMEORIGIN" # Set frame options
+        referrerPolicy: "strict-origin-when-cross-origin" # Set referrer policy
+        forceSTSHeader: true # Force STS header
+        stsIncludeSubdomains: true # Include subdomains
+        stsSeconds: 63072000 # STS seconds
+        stsPreload: true # Preload STS
+    # CrowdSec configuration with proper IP forwarding
+    crowdsec:
+      plugin:
+        crowdsec:
+          enabled: true # Enable CrowdSec plugin
+          logLevel: INFO # Log level
+          updateIntervalSeconds: 15 # Update interval
+          updateMaxFailure: 0 # Update max failure
+          defaultDecisionSeconds: 15 # Default decision seconds
+          httpTimeoutSeconds: 10 # HTTP timeout
+          crowdsecMode: live # CrowdSec mode
+          crowdsecAppsecEnabled: true # Enable AppSec
+          crowdsecAppsecHost: crowdsec:7422 # CrowdSec IP address which you noted down later
+          crowdsecAppsecFailureBlock: true # Block on failure
+          crowdsecAppsecUnreachableBlock: true # Block on unreachable
+          crowdsecAppsecBodyLimit: 10485760
+          crowdsecLapiKey: "PUT_YOUR_BOUNCER_KEY_HERE_OR_IT_WILL_NOT_WORK" # CrowdSec API key which you noted down later
+          crowdsecLapiHost: crowdsec:8080 # CrowdSec  
+          crowdsecLapiScheme: http # CrowdSec API scheme
+          forwardedHeadersTrustedIPs: # Forwarded headers trusted IPs
+            - "0.0.0.0/0" # All IP addresses are trusted for forwarded headers (CHANGE MADE HERE)
+          clientTrustedIPs: # Client trusted IPs (CHANGE MADE HERE)
+            - "10.0.0.0/8" # Internal LAN IP addresses
+            - "172.16.0.0/12" # Internal LAN IP addresses
+            - "192.168.0.0/16" # Internal LAN IP addresses
+            - "100.89.137.0/20" # Internal LAN IP addresses

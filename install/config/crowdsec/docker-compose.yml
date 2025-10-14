@@ -1,0 +1,27 @@
+services:
+  crowdsec:
+    image: docker.io/crowdsecurity/crowdsec:latest
+    container_name: crowdsec
+    environment:
+      GID: "1000"
+      COLLECTIONS: crowdsecurity/traefik crowdsecurity/appsec-virtual-patching crowdsecurity/appsec-generic-rules
+      ENROLL_INSTANCE_NAME: "pangolin-crowdsec"
+      PARSERS: crowdsecurity/whitelists
+      ENROLL_TAGS: docker
+    healthcheck:
+      interval: 10s
+      retries: 15
+      timeout: 10s
+      test: ["CMD", "cscli", "capi", "status"]
+    labels:
+      - "traefik.enable=false" # Disable traefik for crowdsec
+    volumes:
+      # crowdsec container data
+      - ./config/crowdsec:/etc/crowdsec # crowdsec config
+      - ./config/crowdsec/db:/var/lib/crowdsec/data # crowdsec db
+      # log bind mounts into crowdsec
+      - ./config/traefik/logs:/var/log/traefik # traefik logs
+    ports:
+      - 6060:6060 # metrics endpoint for prometheus
+    restart: unless-stopped
+    command: -t # Add test config flag to verify configuration
