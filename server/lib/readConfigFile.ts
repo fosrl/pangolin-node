@@ -17,13 +17,13 @@ export const configSchema = z.object({
                 .default("info"),
             log_failed_attempts: z.boolean().optional().default(false)
         })
-        .default({}),
+        .prefault({}),
     server: z
         .object({
             internal_port: portSchema.default(3001),
             internal_hostname: z.string().optional().default("pangolin"),
         })
-        .default({}),
+        .prefault({}),
     managed: z.object({
         name: z.string().optional(),
         id: z.string().optional(),
@@ -48,7 +48,7 @@ export const configSchema = z.object({
                 .default("/var/dynamic/router_config.yml")
         })
         .optional()
-        .default({}),
+        .prefault({}),
     gerbil: z.object({
         base_endpoint: z.string(),
         reachable_at: z.string().optional().default("http://gerbil:3003"),

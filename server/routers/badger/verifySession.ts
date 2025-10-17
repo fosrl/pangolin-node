@@ -35,10 +35,10 @@ const cache = new NodeCache({
 });
 
 const verifyResourceSessionSchema = z.object({
-    sessions: z.record(z.string()).optional(),
-    headers: z.record(z.string()).optional(),
-    query: z.record(z.string()).optional(),
-    originalRequestURL: z.string().url(),
+    sessions: z.record(z.string(), z.string()).optional(),
+    headers: z.record(z.string(), z.string()).optional(),
+    query: z.record(z.string(), z.string()).optional(),
+    originalRequestURL: z.url(),
     scheme: z.string(),
     host: z.string(),
     path: z.string(),
