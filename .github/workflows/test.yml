@@ -15,7 +15,7 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: '22'
+          node-version: '24'
 
       - name: Copy config file
         run: cp config/config.example.yml config/config.yml
