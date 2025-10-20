@@ -1,6 +1,6 @@
 module installer
 
-go 1.24.0
+go 1.25
 
 require (
 	golang.org/x/term v0.36.0
