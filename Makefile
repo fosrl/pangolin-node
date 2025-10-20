@@ -16,10 +16,10 @@ build-release:
 		--push .
 
 build:
-	docker build -t pangolin-node .
+	docker build -t fosrl/pangolin-node:latest .
 
 test:
 	docker run -it -p 3001:3001 -p 3002:3002 -v ./config:/app/config fosrl/pangolin-node:latest
 
 clean:
-	docker rmi pangolin-node
+	docker rmi fosrl/pangolin-node
