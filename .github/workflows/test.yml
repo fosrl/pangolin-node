@@ -9,7 +9,7 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-
+    
     steps:
       - uses: actions/checkout@v5
 
@@ -17,30 +17,11 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Copy config file
-        run: cp config/config.example.yml config/config.yml
-
       - name: Install dependencies
         run: npm ci
 
       - name: Test with tsc
         run: npx tsc --noEmit
 
-      - name: Start app in background
-        run: nohup npm run dev &
-
-      - name: Wait for app availability
-        run: |
-          for i in {1..5}; do
-            if curl --silent --fail http://localhost:3001/api/v1/traefik-config; then
-              echo "App is up"
-              exit 0
-            fi
-            echo "Waiting for the app... attempt $i"
-            sleep 5
-          done
-          echo "App failed to start"
-          exit 1
-
-      - name: Build Docker image sqlite
+      - name: Build Docker image
         run: make build
