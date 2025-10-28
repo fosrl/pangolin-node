@@ -17,7 +17,7 @@
     },
     "dependencies": {
         "@node-rs/argon2": "2.0.2",
-        "axios": "1.12.2",
+        "axios": "1.13.0",
         "cookie-parser": "1.4.7",
         "cors": "2.8.5",
         "drizzle-orm": "0.44.7",
