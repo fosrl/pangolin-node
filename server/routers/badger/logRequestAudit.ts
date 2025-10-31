@@ -50,7 +50,7 @@ async function getRetentionDays(orgId: string): Promise<number> {
         const response = await axios.get(
             `${
                 config.getRawConfig().managed?.endpoint
-            }/api/v1/hybrid/org/:orgId/get-retention-days`,
+            }/api/v1/hybrid/org/${orgId}/get-retention-days`,
             await tokenManager.getAuthHeader()
         );
         return response.data.data.days;
@@ -73,9 +73,7 @@ async function getRetentionDays(orgId: string): Promise<number> {
 
 async function sendQueuedLogs() {
     await axios.post(
-        `${
-            config.getRawConfig().managed?.endpoint
-        }/api/v1/hybrid/org/:orgId/logs/batch`,
+        `${config.getRawConfig().managed?.endpoint}/api/v1/hybrid/logs/batch`,
         {
             logs: logQueue
         },
@@ -193,11 +191,6 @@ export async function logRequestAudit(
         };
 
         logQueue.push(payload);
-
-        if (logQueue.length >= 25) {
-            await sendQueuedLogs();
-            logQueue = [];
-        }
     } catch (error) {
         logQueue = []; // clear queue on error to prevent buildup
         if (axios.isAxiosError(error)) {
@@ -214,3 +207,15 @@ export async function logRequestAudit(
         }
     }
 }
+
+// set a periodic flush of the log queue every 30 seconds
+setInterval(async () => {
+    if (logQueue.length > 0) {
+        try {
+            await sendQueuedLogs();
+            logQueue = [];
+        } catch (error) {
+            logger.error("Error sending queued logs:", error);
+        }
+    }
+}, 30000);

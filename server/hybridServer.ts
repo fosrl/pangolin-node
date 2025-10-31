@@ -91,7 +91,8 @@ export async function createHybridClientServer() {
     client.on("connect", () => {
         logger.info("Connected to WebSocket server");
         client.sendMessage("remoteExitNode/register", {
-            remoteExitNodeVersion: APP_VERSION
+            remoteExitNodeVersion: APP_VERSION,
+            remoteExitNodeSecondaryVersion: APP_VERSION
         });
     });
 
