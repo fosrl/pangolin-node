@@ -918,7 +918,7 @@ async function checkRules(
             return rule.action as any;
         } else if (
             ipCC &&
-            rule.match == "GEOIP" &&
+            rule.match == "COUNTRY" &&
             (await isIpInGeoIP(ipCC, rule.value))
         ) {
             return rule.action as any;

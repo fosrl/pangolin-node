@@ -484,6 +484,23 @@ export class TraefikConfigManager {
                 };
             }
 
+            // tcp:
+            //     serversTransports:
+            //         pp-transport-v1:
+            //         proxyProtocol:
+            //             version: 1
+            //         pp-transport-v2:
+            //         proxyProtocol:
+            //             version: 2
+
+            // add the serversTransports section if not present
+            if (traefikConfig.tcp && !traefikConfig.tcp.serversTransports) {
+                traefikConfig.tcp.serversTransports = {
+                    "pp-transport-v1": { proxyProtocol: { version: 1 } },
+                    "pp-transport-v2": { proxyProtocol: { version: 2 } }
+                };
+            }
+
             return { domains, traefikConfig };
         } catch (error) {
             // pull data out of the axios error to log
