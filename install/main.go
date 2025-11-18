@@ -43,8 +43,8 @@ type Config struct {
 type SupportedContainer string
 
 const (
-	Docker SupportedContainer = "docker"
-	Podman SupportedContainer = "podman"
+	Docker    SupportedContainer = "docker"
+	Podman    SupportedContainer = "podman"
 	Undefined SupportedContainer = "undefined"
 )
 
@@ -96,7 +96,7 @@ func main() {
 			fmt.Printf("Your managed credentials have been obtained successfully.\n")
 			fmt.Printf("	ID:     %s\n", config.HybridId)
 			fmt.Printf("	Secret: %s\n", config.HybridSecret)
-			fmt.Println("\nTake these to the Pangolin dashboard https://pangolin.fossorial.io to adopt your node.\n")
+			fmt.Print("\nTake these to the Pangolin dashboard https://app.pangolin.net to adopt your node.\n\n")
 			readBool(reader, "Have you adopted your node?", true)
 		}
 
@@ -183,8 +183,8 @@ func main() {
 
 	// 				parsedURL, err := url.Parse(appConfig.DashboardURL)
 	// 				if err != nil {
-    //                     fmt.Printf("Error parsing URL: %v\n", err)
-    //                     return
+	//                     fmt.Printf("Error parsing URL: %v\n", err)
+	//                     return
 	// 				}
 
 	// 				config.DashboardDomain = parsedURL.Hostname()
