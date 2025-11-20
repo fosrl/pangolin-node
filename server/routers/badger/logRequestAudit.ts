@@ -56,7 +56,7 @@ async function getRetentionDays(orgId: string): Promise<number> {
         return response.data.data.days;
     } catch (error) {
         if (axios.isAxiosError(error)) {
-            logger.error("Error fetching retention days:", {
+            logger.error("logRequestAudit: Error fetching retention days:", {
                 message: error.message,
                 code: error.code,
                 status: error.response?.status,
@@ -65,20 +65,49 @@ async function getRetentionDays(orgId: string): Promise<number> {
                 method: error.config?.method
             });
         } else {
-            logger.error("Error fetching retention days:", error);
+            logger.error("logRequestAudit: Error fetching retention days:", error);
         }
         return 0;
     }
 }
 
-async function sendQueuedLogs() {
-    await axios.post(
-        `${config.getRawConfig().managed?.endpoint}/api/v1/hybrid/logs/batch`,
-        {
-            logs: logQueue
-        },
-        await tokenManager.getAuthHeader()
-    );
+async function sendQueuedLogs(): Promise<boolean> {
+    try {
+        const endpoint = config.getRawConfig().managed?.endpoint;
+        if (!endpoint) {
+            logger.warn("Cannot send logs: managed endpoint not configured");
+            return false;
+        }
+
+        // create a copy of the log queue to process
+        const logsToProcess = [...logQueue];
+        // Process logs in batches of 100
+        for (let i = 0; i < logsToProcess.length; i += 100) {
+            const batch = logsToProcess.slice(i, i + 100);
+            await axios.post(
+            `${endpoint}/api/v1/hybrid/logs/batch`,
+            {
+                logs: batch
+            },
+            await tokenManager.getAuthHeader()
+            );
+        }
+    } catch (error) {
+        if (axios.isAxiosError(error)) {
+            logger.error("logRequestAudit: Error sending queued logs:", {
+                message: error.message,
+                code: error.code,
+                status: error.response?.status,
+                statusText: error.response?.statusText,
+                url: error.config?.url,
+                method: error.config?.method
+            });
+        } else {
+            logger.error("logRequestAudit: Error sending queued logs:", error);
+        }
+        return false;
+    }
+    return true;
 }
 
 export async function logRequestAudit(
@@ -190,32 +219,27 @@ export async function logRequestAudit(
             tls: body.tls
         };
 
+        // if the queue is full dont push new logs
+        if (logQueue.length >= 10000) {
+            logger.warn(
+                "logRequestAudit: Log queue full, dropping log entry to prevent memory issues"
+            );
+            return;
+        }
+
         logQueue.push(payload);
     } catch (error) {
         logQueue = []; // clear queue on error to prevent buildup
-        if (axios.isAxiosError(error)) {
-            logger.error("Error fetching retention days:", {
-                message: error.message,
-                code: error.code,
-                status: error.response?.status,
-                statusText: error.response?.statusText,
-                url: error.config?.url,
-                method: error.config?.method
-            });
-        } else {
-            logger.error("Error fetching config in verify session:", error);
-        }
+        logger.error("logRequestAudit: Error fetching config in verify session:", error);
     }
 }
 
 // set a periodic flush of the log queue every 30 seconds
 setInterval(async () => {
+    logger.debug(`logRequestAudit: Attempting to upload log queue of size ${logQueue.length}`);
     if (logQueue.length > 0) {
-        try {
-            await sendQueuedLogs();
+        if (await sendQueuedLogs()) {
             logQueue = [];
-        } catch (error) {
-            logger.error("Error sending queued logs:", error);
         }
     }
 }, 30000);
