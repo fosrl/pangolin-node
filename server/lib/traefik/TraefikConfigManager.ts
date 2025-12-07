@@ -138,8 +138,24 @@ export class TraefikConfigManager {
                 const wildcardExists = await this.fileExists(wildcardPath);
 
                 let lastModified: Date | null = null;
-                const expiresAt: Date | null = null;
+                let expiresAt: number | null = null;
                 let wildcard = false;
+                const expiresAtPath = path.join(domainDir, ".expires_at");
+                const expiresAtExists = await this.fileExists(expiresAtPath);
+
+                if (expiresAtExists) {
+                    try {
+                        const expiresAtStr = fs
+                            .readFileSync(expiresAtPath, "utf8")
+                            .trim();
+                        expiresAt = parseInt(expiresAtStr, 10);
+                        if (isNaN(expiresAt)) {
+                            expiresAt = null;
+                        }
+                    } catch {
+                        expiresAt = null;
+                    }
+                }
 
                 if (lastUpdateExists) {
                     try {
@@ -175,7 +191,7 @@ export class TraefikConfigManager {
 
                 state.set(domain, {
                     exists: certExists && keyExists,
-                    lastModified,
+                    lastModified: lastModified ? Math.floor(lastModified.getTime() / 1000) : null,
                     expiresAt,
                     wildcard
                 });
@@ -255,9 +271,9 @@ export class TraefikConfigManager {
 
             // Check if certificate is expiring soon (within 30 days)
             if (localState.expiresAt) {
-                const daysUntilExpiry =
-                    (localState.expiresAt - Math.floor(Date.now() / 1000)) /
-                    (1000 * 60 * 60 * 24);
+                const nowInSeconds = Math.floor(Date.now() / 1000);
+                const secondsUntilExpiry = localState.expiresAt - nowInSeconds;
+                const daysUntilExpiry = secondsUntilExpiry / (60 * 60 * 24);
                 if (daysUntilExpiry < 30) {
                     logger.info(
                         `Fetching certificates due to upcoming expiry for ${domain} (${Math.round(
@@ -746,6 +762,16 @@ export class TraefikConfigManager {
                         cert.wildcard ? "true" : "false",
                         "utf8"
                     );
+
+                    // Store the certificate expiry time
+                    if (cert.expiresAt) {
+                        const expiresAtPath = path.join(domainDir, ".expires_at");
+                        fs.writeFileSync(
+                            expiresAtPath,
+                            cert.expiresAt.toString(),
+                            "utf8"
+                        );
+                    }
 
                     logger.info(
                         `Certificate updated for domain: ${cert.domain}${
