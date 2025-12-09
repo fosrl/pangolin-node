@@ -763,30 +763,31 @@ export class TraefikConfigManager {
                         "utf8"
                     );
 
-                    // Store the certificate expiry time
-                    if (cert.expiresAt) {
-                        const expiresAtPath = path.join(domainDir, ".expires_at");
-                        fs.writeFileSync(
-                            expiresAtPath,
-                            cert.expiresAt.toString(),
-                            "utf8"
-                        );
-                    }
-
                     logger.info(
                         `Certificate updated for domain: ${cert.domain}${
                             cert.wildcard ? " (wildcard)" : ""
                         }`
                     );
-
-                    // Update local state tracking
-                    this.lastLocalCertificateState.set(cert.domain, {
-                        exists: true,
-                        lastModified: Math.floor(Date.now() / 1000),
-                        expiresAt: cert.expiresAt,
-                        wildcard: cert.wildcard
-                    });
                 }
+
+                // Always update expiry tracking when we fetch a certificate,
+                // even if the cert content didn't change
+                if (cert.expiresAt) {
+                    const expiresAtPath = path.join(domainDir, ".expires_at");
+                    fs.writeFileSync(
+                        expiresAtPath,
+                        cert.expiresAt.toString(),
+                        "utf8"
+                    );
+                }
+
+                // Update local state tracking
+                this.lastLocalCertificateState.set(cert.domain, {
+                    exists: true,
+                    lastModified: Math.floor(Date.now() / 1000),
+                    expiresAt: cert.expiresAt,
+                    wildcard: cert.wildcard
+                });
 
                 // Always ensure the config entry exists and is up to date
                 const certEntry = {
