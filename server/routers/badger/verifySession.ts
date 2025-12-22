@@ -45,7 +45,8 @@ const verifyResourceSessionSchema = z.object({
     path: z.string(),
     method: z.string(),
     tls: z.boolean(),
-    requestIp: z.string().optional()
+    requestIp: z.string().optional(),
+    badgerVersion: z.string().optional()
 });
 
 export type VerifyResourceSessionSchema = z.infer<
@@ -56,12 +57,15 @@ type BasicUserData = {
     username: string;
     email: string | null;
     name: string | null;
+    role: string | null;
 };
 
 export type VerifyUserResponse = {
     valid: boolean;
+    headerAuthChallenged?: boolean;
     redirectUrl?: string;
     userData?: BasicUserData;
+    pangolinVersion?: string;
 };
 
 export async function verifyResourceSession(
@@ -90,7 +94,8 @@ export async function verifyResourceSession(
             requestIp,
             path,
             headers,
-            query
+            query,
+            badgerVersion
         } = parsedBody.data;
 
         // Extract HTTP Basic Auth credentials if present
@@ -99,6 +104,15 @@ export async function verifyResourceSession(
         const clientIp = requestIp
             ? (() => {
                   logger.debug("Request IP:", { requestIp });
+                  const isNewerBadger =
+                      badgerVersion &&
+                      semver.valid(badgerVersion) &&
+                      semver.gte(badgerVersion, "1.3.1");
+
+                  if (isNewerBadger) {
+                      return requestIp;
+                  }
+
                   if (requestIp.startsWith("[") && requestIp.includes("]")) {
                       // if brackets are found, extract the IPv6 address from between the brackets
                       const ipv6Match = requestIp.match(/\[(.*?)\]/);
@@ -107,12 +121,17 @@ export async function verifyResourceSession(
                       }
                   }
 
-                  // ivp4
-                  // split at last colon
-                  const lastColonIndex = requestIp.lastIndexOf(":");
-                  if (lastColonIndex !== -1) {
-                      return requestIp.substring(0, lastColonIndex);
+                  // Check if it looks like IPv4 (contains dots and matches IPv4 pattern)
+                  // IPv4 format: x.x.x.x where x is 0-255
+                  const ipv4Pattern = /^(\d{1,3}\.){3}\d{1,3}/;
+                  if (ipv4Pattern.test(requestIp)) {
+                      const lastColonIndex = requestIp.lastIndexOf(":");
+                      if (lastColonIndex !== -1) {
+                          return requestIp.substring(0, lastColonIndex);
+                      }
                   }
+
+                  // Return as is
                   return requestIp;
               })()
             : undefined;
@@ -122,6 +141,8 @@ export async function verifyResourceSession(
         const ipCC = clientIp
             ? await getCountryCodeFromIp(clientIp)
             : undefined;
+
+        const ipAsn = clientIp ? await getAsnFromIp(clientIp) : undefined;
 
         let cleanHost = host;
         // if the host ends with :port, strip it
@@ -137,6 +158,8 @@ export async function verifyResourceSession(
                   pincode: ResourcePincode | null;
                   password: ResourcePassword | null;
                   headerAuth: ResourceHeaderAuth | null;
+                  headerAuthExtendedCompatibility: ResourceHeaderAuthExtendedCompatibility | null;
+                  org: Org;
               }
             | undefined = cache.get(resourceCacheKey);
 
@@ -165,7 +188,13 @@ export async function verifyResourceSession(
             cache.set(resourceCacheKey, resourceData, 5);
         }
 
-        const { resource, pincode, password, headerAuth } = resourceData;
+        const {
+            resource,
+            pincode,
+            password,
+            headerAuth,
+            headerAuthExtendedCompatibility
+        } = resourceData;
 
         if (!resource) {
             logger.debug(`Resource not found ${cleanHost}`);
@@ -210,7 +239,8 @@ export async function verifyResourceSession(
                 resource.resourceId,
                 clientIp,
                 path,
-                ipCC
+                ipCC,
+                ipAsn
             );
 
             if (action == "ACCEPT") {
@@ -333,7 +363,7 @@ export async function verifyResourceSession(
                         location: ipCC,
                         apiKey: {
                             name: tokenItem.title,
-                            apiKeyId: tokenItem.accessTokenId,
+                            apiKeyId: tokenItem.accessTokenId
                         }
                     },
                     parsedBody.data
@@ -384,7 +414,7 @@ export async function verifyResourceSession(
                         location: ipCC,
                         apiKey: {
                             name: tokenItem.title,
-                            apiKeyId: tokenItem.accessTokenId,
+                            apiKeyId: tokenItem.accessTokenId
                         }
                     },
                     parsedBody.data
@@ -408,7 +438,7 @@ export async function verifyResourceSession(
                         reason: 103, // valid header auth
                         resourceId: resource.resourceId,
                         orgId: resource.orgId,
-                        location: ipCC,
+                        location: ipCC
                     },
                     parsedBody.data
                 );
@@ -442,7 +472,8 @@ export async function verifyResourceSession(
                 !sso &&
                 !pincode &&
                 !password &&
-                !resource.emailWhitelistEnabled
+                !resource.emailWhitelistEnabled &&
+                !headerAuthExtendedCompatibility?.extendedCompatibilityIsActivated
             ) {
                 logRequestAudit(
                     {
@@ -463,7 +494,8 @@ export async function verifyResourceSession(
                 !sso &&
                 !pincode &&
                 !password &&
-                !resource.emailWhitelistEnabled
+                !resource.emailWhitelistEnabled &&
+                !headerAuthExtendedCompatibility?.extendedCompatibilityIsActivated
             ) {
                 logRequestAudit(
                     {
@@ -549,6 +581,20 @@ export async function verifyResourceSession(
             }
 
             if (resourceSession) {
+                // only run this check if not SSO session; SSO session length is checked later
+                const accessPolicy = await enforceResourceSessionLength(
+                    resourceSession,
+                    resourceData.org
+                );
+
+                if (!accessPolicy.valid) {
+                    logger.debug(
+                        "Resource session invalid due to org policy:",
+                        accessPolicy.error
+                    );
+                    return notAllowed(res, redirectPath, resource.orgId);
+                }
+
                 if (pincode && resourceSession.pincodeId) {
                     logger.debug(
                         "Resource allowed because pincode session is valid"
@@ -623,7 +669,7 @@ export async function verifyResourceSession(
                             location: ipCC,
                             apiKey: {
                                 name: resourceSession.accessTokenTitle,
-                                apiKeyId: resourceSession.accessTokenId,
+                                apiKeyId: resourceSession.accessTokenId
                             }
                         },
                         parsedBody.data
@@ -643,7 +689,8 @@ export async function verifyResourceSession(
                     if (allowedUserData === undefined) {
                         allowedUserData = await isUserAllowedToAccessResource(
                             resourceSession.userSessionId,
-                            resource
+                            resource,
+                            resourceData.org
                         );
 
                         cache.set(userAccessCacheKey, allowedUserData, 5);
@@ -676,6 +723,15 @@ export async function verifyResourceSession(
                     }
                 }
             }
+        }
+
+        // If headerAuthExtendedCompatibility is activated but no clientHeaderAuth provided, force client to challenge
+        if (
+            headerAuthExtendedCompatibility &&
+            headerAuthExtendedCompatibility.extendedCompatibilityIsActivated &&
+            !clientHeaderAuth
+        ) {
+            return headerAuthChallenged(res, redirectPath, resource.orgId);
         }
 
         logger.debug("No more auth to check, resource not allowed");
@@ -792,7 +848,7 @@ async function notAllowed(
     }
 
     const data = {
-        data: { valid: false, redirectUrl },
+        data: { valid: false, redirectUrl,  pangolinVersion: APP_VERSION },
         success: true,
         error: false,
         message: "Access denied",
@@ -806,8 +862,8 @@ function allowed(res: Response, userData?: BasicUserData) {
     const data = {
         data:
             userData !== undefined && userData !== null
-                ? { valid: true, ...userData }
-                : { valid: true },
+                ? { valid: true, ...userData,  pangolinVersion: APP_VERSION }
+                : { valid: true,  pangolinVersion: APP_VERSION},
         success: true,
         error: false,
         message: "Access allowed",
@@ -816,9 +872,56 @@ function allowed(res: Response, userData?: BasicUserData) {
     return response<VerifyUserResponse>(res, data);
 }
 
++async function headerAuthChallenged(
++    res: Response,
++    redirectPath?: string,
++    orgId?: string
++) {
++    let loginPage: LoginPage | null = null;
++    if (orgId) {
++        const { tier } = await getOrgTierData(orgId); // returns null in oss
++        if (tier === TierId.STANDARD) {
++            loginPage = await getOrgLoginPage(orgId);
++        }
++    }
++
++    let redirectUrl: string | undefined = undefined;
++    if (redirectPath) {
++        let endpoint: string;
++
++        if (loginPage && loginPage.domainId && loginPage.fullDomain) {
++            const secure = config
++                .getRawConfig()
++                .app.dashboard_url?.startsWith("https");
++            const method = secure ? "https" : "http";
++            endpoint = `${method}://${loginPage.fullDomain}`;
++        } else {
++            endpoint = config.getRawConfig().app.dashboard_url!;
++        }
++        redirectUrl = `${endpoint}${redirectPath}`;
++    }
++
++    const data = {
++        data: {
++            headerAuthChallenged: true,
++            valid: false,
++            redirectUrl,
++            pangolinVersion: APP_VERSION
++        },
++        success: true,
++        error: false,
++        message: "Access denied",
++        status: HttpCode.OK
++    };
++    logger.debug(JSON.stringify(data));
++    return response<VerifyUserResponse>(res, data);
++}
++
+
 async function isUserAllowedToAccessResource(
     userSessionId: string,
-    resource: Resource
+    resource: Resource,
+    org: Org
 ): Promise<BasicUserData | null> {
     const result = await getUserSessionWithUser(userSessionId);
 
