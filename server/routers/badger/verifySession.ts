@@ -37,6 +37,8 @@ import semver from "semver";
 import { APP_VERSION } from "@server/lib/consts";
 import { enforceResourceSessionLength } from "@server/lib/checkOrgAccessPolicy";
 
+const APP_VERSION_PREPEND = `remote-${APP_VERSION}`;
+
 // We'll see if this speeds anything up
 const cache = new NodeCache({
     stdTTL: 5 // seconds
@@ -855,7 +857,11 @@ async function notAllowed(
     }
 
     const data = {
-        data: { valid: false, redirectUrl, pangolinVersion: APP_VERSION },
+        data: {
+            valid: false,
+            redirectUrl,
+            pangolinVersion: APP_VERSION_PREPEND
+        },
         success: true,
         error: false,
         message: "Access denied",
@@ -869,8 +875,12 @@ function allowed(res: Response, userData?: BasicUserData) {
     const data = {
         data:
             userData !== undefined && userData !== null
-                ? { valid: true, ...userData, pangolinVersion: APP_VERSION }
-                : { valid: true, pangolinVersion: APP_VERSION },
+                ? {
+                      valid: true,
+                      ...userData,
+                      pangolinVersion: APP_VERSION_PREPEND
+                  }
+                : { valid: true, pangolinVersion: APP_VERSION_PREPEND },
         success: true,
         error: false,
         message: "Access allowed",
@@ -911,7 +921,7 @@ async function headerAuthChallenged(
             headerAuthChallenged: true,
             valid: false,
             redirectUrl,
-            pangolinVersion: APP_VERSION
+            pangolinVersion: APP_VERSION_PREPEND
         },
         success: true,
         error: false,
