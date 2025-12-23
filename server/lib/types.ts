@@ -43,6 +43,26 @@ export type ResourceHeaderAuth = {
     headerAuthHash: string;
 };
 
+export type ResourceHeaderAuthExtendedCompatibility = {
+    resourceId: number;
+    headerAuthExtendedCompatibilityId: number;
+    extendedCompatibilityIsActivated: boolean;
+}
+
+export type Org = {
+    name: string;
+    orgId: string;
+    subnet: string | null;
+    utilitySubnet: string | null;
+    createdAt: string | null;
+    requireTwoFactor: boolean | null;
+    maxSessionLengthHours: number | null;
+    passwordExpiryDays: number | null;
+    settingsLogRetentionDaysRequest: number;
+    settingsLogRetentionDaysAccess: number;
+    settingsLogRetentionDaysAction: number;
+}
+
 export type LoginPage = {
     loginPageId: number;
     subdomain: string | null;
@@ -83,6 +103,7 @@ export type ResourceSession = {
     accessTokenId: string | null;
     isRequestToken: boolean;
     userSessionId: string | null;
+    issuedAt: number | null;
 };
 
 export type ResourceAccessToken = {

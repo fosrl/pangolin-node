@@ -2,13 +2,24 @@ import axios from "axios";
 import config from "@server/lib/config";
 import logger from "@server/logger";
 import { tokenManager } from "@server/lib/tokenManager";
-import { LoginPage, Resource, ResourceHeaderAuth, ResourcePassword, ResourcePincode, ResourceRule } from "@server/lib/types";
+import {
+    LoginPage,
+    Org,
+    Resource,
+    ResourceHeaderAuth,
+    ResourceHeaderAuthExtendedCompatibility,
+    ResourcePassword,
+    ResourcePincode,
+    ResourceRule
+} from "@server/lib/types";
 
 export type ResourceWithAuth = {
     resource: Resource | null;
     pincode: ResourcePincode | null;
     password: ResourcePassword | null;
     headerAuth: ResourceHeaderAuth | null;
+    headerAuthExtendedCompatibility: ResourceHeaderAuthExtendedCompatibility | null;
+    org: Org;
 };
 
 export type UserSessionWithUser = {
@@ -96,6 +107,38 @@ export async function getUserOrgRole(userId: string, orgId: string) {
             });
         } else {
             logger.error("Error fetching config in verify session:", error);
+        }
+        return null;
+    }
+}
+
+export type CheckOrgAccessPolicyProps = {
+    orgId?: string;
+    userId?: string;
+    sessionId?: string;
+};
+/**
+ * Check if the user has a valid session
+ */
+export async function checkOrgAccessPolicy(props: CheckOrgAccessPolicyProps) {
+    try {
+        const response = await axios.get(
+            `${config.getRawConfig().managed?.endpoint}/api/v1/hybrid/user/${props.userId}/org/${props.orgId}/session/${props.sessionId}/verify`,
+            await tokenManager.getAuthHeader()
+        );
+        return response.data.data;
+    } catch (error) {
+        if (axios.isAxiosError(error)) {
+            logger.error("Error in verify session for user in org:", {
+                message: error.message,
+                code: error.code,
+                status: error.response?.status,
+                statusText: error.response?.statusText,
+                url: error.config?.url,
+                method: error.config?.method
+            });
+        } else {
+            logger.error("Error in verify session for user in org:", error);
         }
         return null;
     }

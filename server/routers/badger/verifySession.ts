@@ -6,7 +6,8 @@ import {
     getUserOrgRole,
     getUserResourceAccess,
     getOrgLoginPage,
-    getUserSessionWithUser
+    getUserSessionWithUser,
+    checkOrgAccessPolicy
 } from "@server/routers/ws/verifySessionQueries";
 import config from "@server/lib/config";
 import { isIpInCidr } from "@server/lib/ip";
@@ -21,14 +22,20 @@ import { fromError } from "zod-validation-error";
 import { remoteGetCountryCodeForIp } from "@server/lib/geoip";
 import { verifyPassword } from "@server/auth/password";
 import {
+    Org,
     Resource,
     ResourceHeaderAuth,
+    ResourceHeaderAuthExtendedCompatibility,
     ResourcePassword,
     ResourcePincode,
     ResourceRule
 } from "@server/lib/types";
 import { verifyResourceAccessToken } from "@server/auth/verifyResourceAccessToken";
 import { logRequestAudit } from "./logRequestAudit";
+import { remoteGetASNForIp } from "@server/lib/asn";
+import semver from "semver";
+import { APP_VERSION } from "@server/lib/consts";
+import { enforceResourceSessionLength } from "@server/lib/checkOrgAccessPolicy";
 
 // We'll see if this speeds anything up
 const cache = new NodeCache({
@@ -582,7 +589,7 @@ export async function verifyResourceSession(
 
             if (resourceSession) {
                 // only run this check if not SSO session; SSO session length is checked later
-                const accessPolicy = await enforceResourceSessionLength(
+                const accessPolicy = enforceResourceSessionLength(
                     resourceSession,
                     resourceData.org
                 );
@@ -848,7 +855,7 @@ async function notAllowed(
     }
 
     const data = {
-        data: { valid: false, redirectUrl,  pangolinVersion: APP_VERSION },
+        data: { valid: false, redirectUrl, pangolinVersion: APP_VERSION },
         success: true,
         error: false,
         message: "Access denied",
@@ -862,8 +869,8 @@ function allowed(res: Response, userData?: BasicUserData) {
     const data = {
         data:
             userData !== undefined && userData !== null
-                ? { valid: true, ...userData,  pangolinVersion: APP_VERSION }
-                : { valid: true,  pangolinVersion: APP_VERSION},
+                ? { valid: true, ...userData, pangolinVersion: APP_VERSION }
+                : { valid: true, pangolinVersion: APP_VERSION },
         success: true,
         error: false,
         message: "Access allowed",
@@ -872,51 +879,48 @@ function allowed(res: Response, userData?: BasicUserData) {
     return response<VerifyUserResponse>(res, data);
 }
 
-+async function headerAuthChallenged(
-+    res: Response,
-+    redirectPath?: string,
-+    orgId?: string
-+) {
-+    let loginPage: LoginPage | null = null;
-+    if (orgId) {
-+        const { tier } = await getOrgTierData(orgId); // returns null in oss
-+        if (tier === TierId.STANDARD) {
-+            loginPage = await getOrgLoginPage(orgId);
-+        }
-+    }
-+
-+    let redirectUrl: string | undefined = undefined;
-+    if (redirectPath) {
-+        let endpoint: string;
-+
-+        if (loginPage && loginPage.domainId && loginPage.fullDomain) {
-+            const secure = config
-+                .getRawConfig()
-+                .app.dashboard_url?.startsWith("https");
-+            const method = secure ? "https" : "http";
-+            endpoint = `${method}://${loginPage.fullDomain}`;
-+        } else {
-+            endpoint = config.getRawConfig().app.dashboard_url!;
-+        }
-+        redirectUrl = `${endpoint}${redirectPath}`;
-+    }
-+
-+    const data = {
-+        data: {
-+            headerAuthChallenged: true,
-+            valid: false,
-+            redirectUrl,
-+            pangolinVersion: APP_VERSION
-+        },
-+        success: true,
-+        error: false,
-+        message: "Access denied",
-+        status: HttpCode.OK
-+    };
-+    logger.debug(JSON.stringify(data));
-+    return response<VerifyUserResponse>(res, data);
-+}
-+
+async function headerAuthChallenged(
+    res: Response,
+    redirectPath?: string,
+    orgId?: string
+) {
+    let loginPage: LoginPage | null = null;
+    loginPage = await getOrgLoginPage(orgId);
+
+    let redirectUrl: string | undefined = undefined;
+    if (redirectPath) {
+        let endpoint: string;
+
+        if (loginPage && loginPage.domainId && loginPage.fullDomain) {
+            const secure = config
+                .getRawConfig()
+                .managed?.endpoint.startsWith("https");
+            const method = secure ? "https" : "http";
+            endpoint = `${method}://${loginPage.fullDomain}`;
+        } else {
+            endpoint =
+                config.getRawConfig().managed?.redirect_endpoint ||
+                config.getRawConfig().managed?.endpoint ||
+                "";
+        }
+        redirectUrl = `${endpoint}${redirectPath}`;
+    }
+
+    const data = {
+        data: {
+            headerAuthChallenged: true,
+            valid: false,
+            redirectUrl,
+            pangolinVersion: APP_VERSION
+        },
+        success: true,
+        error: false,
+        message: "Access denied",
+        status: HttpCode.OK
+    };
+    logger.debug(JSON.stringify(data));
+    return response<VerifyUserResponse>(res, data);
+}
 
 async function isUserAllowedToAccessResource(
     userSessionId: string,
@@ -948,6 +952,18 @@ async function isUserAllowedToAccessResource(
         return null;
     }
 
+    const accessPolicy = await checkOrgAccessPolicy({
+        orgId: org.orgId,
+        userId: user.userId,
+        sessionId: session.sessionId
+    });
+    if (!accessPolicy.allowed || accessPolicy.error) {
+        logger.debug(`User not allowed by org access policy because`, {
+            accessPolicy
+        });
+        return null;
+    }
+
     const roleResourceAccess = await getRoleResourceAccess(
         resource.resourceId,
         userOrgRole.roleId
@@ -957,7 +973,8 @@ async function isUserAllowedToAccessResource(
         return {
             username: user.username,
             email: user.email,
-            name: user.name
+            name: user.name,
+            role: user.role
         };
     }
 
@@ -970,7 +987,8 @@ async function isUserAllowedToAccessResource(
         return {
             username: user.username,
             email: user.email,
-            name: user.name
+            name: user.name,
+            role: user.role
         };
     }
 
@@ -981,7 +999,8 @@ async function checkRules(
     resourceId: number,
     clientIp: string | undefined,
     path: string | undefined,
-    ipCC?: string
+    ipCC?: string,
+    ipAsn?: number
 ): Promise<"ACCEPT" | "DROP" | "PASS" | undefined> {
     const ruleCacheKey = `rules:${resourceId}`;
 
@@ -1023,6 +1042,12 @@ async function checkRules(
             ipCC &&
             rule.match == "COUNTRY" &&
             (await isIpInGeoIP(ipCC, rule.value))
+        ) {
+            return rule.action as any;
+        } else if (
+            clientIp &&
+            rule.match == "ASN" &&
+            (await isIpInAsn(ipAsn, rule.value))
         ) {
             return rule.action as any;
         }
@@ -1161,6 +1186,52 @@ async function isIpInGeoIP(
     logger.debug(`IP ${ipCountryCode} is in country: ${checkCountryCode}`);
 
     return ipCountryCode?.toUpperCase() === checkCountryCode.toUpperCase();
+}
+
+async function isIpInAsn(
+    ipAsn: number | undefined,
+    checkAsn: string
+): Promise<boolean> {
+    // Handle "ALL" special case
+    if (checkAsn === "ALL" || checkAsn === "AS0") {
+        return true;
+    }
+
+    if (!ipAsn) {
+        return false;
+    }
+
+    // Normalize the check ASN - remove "AS" prefix if present and convert to number
+    const normalizedCheckAsn = checkAsn.toUpperCase().replace(/^AS/, "");
+    const checkAsnNumber = parseInt(normalizedCheckAsn, 10);
+
+    if (isNaN(checkAsnNumber)) {
+        logger.warn(`Invalid ASN format in rule: ${checkAsn}`);
+        return false;
+    }
+
+    const match = ipAsn === checkAsnNumber;
+    logger.debug(
+        `ASN check: IP ASN ${ipAsn} ${match ? "matches" : "does not match"} rule ASN ${checkAsnNumber}`
+    );
+
+    return match;
+}
+
+async function getAsnFromIp(ip: string): Promise<number | undefined> {
+    const asnCacheKey = `asn:${ip}`;
+
+    let cachedAsn: number | undefined = cache.get(asnCacheKey);
+
+    if (!cachedAsn) {
+        cachedAsn = await remoteGetASNForIp(ip); // do it locally
+        // Cache for longer since IP ASN doesn't change frequently
+        if (cachedAsn) {
+            cache.set(asnCacheKey, cachedAsn, 300); // 5 minutes
+        }
+    }
+
+    return cachedAsn;
 }
 
 async function getCountryCodeFromIp(ip: string): Promise<string | undefined> {
