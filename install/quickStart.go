@@ -13,7 +13,7 @@ import (
 const (
 	FRONTEND_SECRET_KEY = "af4e4785-7e09-11f0-b93a-74563c4e2a7e"
 	// CLOUD_API_URL       = "https://pangolin.fossorial.io/api/v1/remote-exit-node/quick-start"
-	CLOUD_API_URL = "https://pangolin.fossorial.io/api/v1/remote-exit-node/quick-start"
+	CLOUD_API_URL = "https://app.pangolin.net/api/v1/remote-exit-node/quick-start"
 )
 
 // HybridCredentials represents the response from the cloud API

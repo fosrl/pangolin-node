@@ -31,7 +31,7 @@ export const configSchema = z.object({
         endpoint: z
             .string()
             .optional()
-            .default("https://pangolin.fossorial.io"),
+            .default("https://app.pangolin.net"),
         redirect_endpoint: z.string().optional()
     }),
     traefik: z
