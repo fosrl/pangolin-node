@@ -48,7 +48,7 @@
         "@types/pg": "8.15.5",
         "@types/semver": "7.7.1",
         "@types/ws": "8.18.1",
-        "esbuild": "0.27.2",
+        "esbuild": "0.27.4",
         "esbuild-node-externals": "1.20.1",
         "tsx": "4.21.0",
         "typescript": "5.9.3",
