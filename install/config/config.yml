@@ -2,9 +2,9 @@
 # https://docs.pangolin.net/
 
 gerbil:
-    start_port: 51820
-    base_endpoint: "{{.DashboardDomain}}"
+  start_port: 51820
+  base_endpoint: "{{.DashboardDomain}}"
 
 managed:
-    id: "{{.HybridId}}"
-    secret: "{{.HybridSecret}}"
+  id: "{{.HybridId}}"
+  secret: "{{.HybridSecret}}"
