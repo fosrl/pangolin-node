@@ -994,15 +994,11 @@ async function isUserAllowedToAccessResource(
     );
 
     if (userResourceAccess) {
-        const names = await Promise.all(
-            userOrgRoleIds.map((id) => getRoleName(id))
-        );
-        const role = names.filter(Boolean).join(", ") || "";
         return {
             username: user.username,
             email: user.email,
             name: user.name,
-            role
+            role: user.roleNames
         };
     }
 

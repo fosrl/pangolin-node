@@ -210,7 +210,11 @@ export async function getRoleResourceAccess(
 export async function getUserResourceAccess(
     userId: string,
     resourceId: number
-) {
+): Promise<{
+    userId: string;
+    resourceId: number;
+    roleNames: string[];
+} | null> {
     try {
         const response = await axios.get(
             `${config.getRawConfig().managed?.endpoint}/api/v1/hybrid/user/${userId}/resource/${resourceId}/access`,
