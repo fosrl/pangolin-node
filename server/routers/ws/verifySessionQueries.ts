@@ -179,12 +179,12 @@ export async function checkOrgAccessPolicy(props: CheckOrgAccessPolicyProps) {
  */
 export async function getRoleResourceAccess(
     resourceId: number,
-    roleId: number
-) {
+    roleIds: number[]
+): Promise<{ resourceId: number; roleId: number; roleName: string }[] | null> {
     try {
         const response = await axios.get(
-            `${config.getRawConfig().managed?.endpoint}/api/v1/hybrid/role/${roleId}/resource/${resourceId}/access`,
-            await tokenManager.getAuthHeader()
+            `${config.getRawConfig().managed?.endpoint}/api/v1/hybrid/resource/${resourceId}/access`,
+            { ...await tokenManager.getAuthHeader(), params: { roleIds: roleIds } }
         );
         return response.data.data;
     } catch (error) {

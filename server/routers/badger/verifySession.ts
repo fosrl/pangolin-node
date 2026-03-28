@@ -975,23 +975,16 @@ async function isUserAllowedToAccessResource(
         return null;
     }
 
-    const roleNames: string[] = [];
-    for (const roleId of userOrgRoleIds) {
-        const roleResourceAccess = await getRoleResourceAccess(
-            resource.resourceId,
-            roleId
-        );
-        if (roleResourceAccess) {
-            const roleName = await getRoleName(roleId);
-            if (roleName) roleNames.push(roleName);
-        }
-    }
-    if (roleNames.length > 0) {
+    const roleResourceAccess = await getRoleResourceAccess(
+        resource.resourceId,
+        userOrgRoleIds
+    );
+    if (roleResourceAccess && roleResourceAccess.length > 0) {
         return {
             username: user.username,
             email: user.email,
             name: user.name,
-            role: roleNames.join(", ")
+            role: roleResourceAccess.map((r) => r.roleName).join(", ")
         };
     }
 
