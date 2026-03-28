@@ -998,7 +998,7 @@ async function isUserAllowedToAccessResource(
             username: user.username,
             email: user.email,
             name: user.name,
-            role: user.roleNames
+            role: user.roleNames.join(", ")
         };
     }
 
