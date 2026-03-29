@@ -4,7 +4,7 @@ import {
     getResourceRules,
     getRoleName,
     getRoleResourceAccess,
-    getUserOrgRoleIds,
+    getUserOrgRoleIds as getUserOrgRoles,
     getUserResourceAccess,
     getOrgLoginPage,
     getUserSessionWithUser,
@@ -957,9 +957,9 @@ async function isUserAllowedToAccessResource(
         return null;
     }
 
-    const userOrgRoleIds = await getUserOrgRoleIds(user.userId, resource.orgId);
+    const userOrgRoles = await getUserOrgRoles(user.userId, resource.orgId);
 
-    if (!userOrgRoleIds.length) {
+    if (!userOrgRoles.length) {
         return null;
     }
 
@@ -977,14 +977,14 @@ async function isUserAllowedToAccessResource(
 
     const roleResourceAccess = await getRoleResourceAccess(
         resource.resourceId,
-        userOrgRoleIds
+        userOrgRoles.map((r) => r.roleId)
     );
     if (roleResourceAccess && roleResourceAccess.length > 0) {
         return {
             username: user.username,
             email: user.email,
             name: user.name,
-            role: roleResourceAccess.map((r) => r.roleName).join(", ")
+            role: userOrgRoles.map((r) => r.roleName).join(", ")
         };
     }
 
@@ -998,7 +998,7 @@ async function isUserAllowedToAccessResource(
             username: user.username,
             email: user.email,
             name: user.name,
-            role: user.roleNames.join(", ")
+            role: userOrgRoles.map((r) => r.roleName).join(", ")
         };
     }
 

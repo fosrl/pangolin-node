@@ -91,7 +91,7 @@ export async function getUserSessionWithUser(
 export async function getUserOrgRoleIds(
     userId: string,
     orgId: string
-): Promise<number[]> {
+): Promise<{ roleId: number, roleName: string }[]> {
     try {
         const response = await axios.get(
             `${config.getRawConfig().managed?.endpoint}/api/v1/hybrid/user/${userId}/org/${orgId}/role`,
@@ -180,7 +180,7 @@ export async function checkOrgAccessPolicy(props: CheckOrgAccessPolicyProps) {
 export async function getRoleResourceAccess(
     resourceId: number,
     roleIds: number[]
-): Promise<{ resourceId: number; roleId: number; roleName: string }[] | null> {
+): Promise<{ resourceId: number; roleId: number; }[] | null> {
     try {
         const response = await axios.get(
             `${config.getRawConfig().managed?.endpoint}/api/v1/hybrid/resource/${resourceId}/access`,
