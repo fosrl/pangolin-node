@@ -94,7 +94,7 @@ export async function getUserOrgRoleIds(
 ): Promise<{ roleId: number, roleName: string }[]> {
     try {
         const response = await axios.get(
-            `${config.getRawConfig().managed?.endpoint}/api/v1/hybrid/user/${userId}/org/${orgId}/role`,
+            `${config.getRawConfig().managed?.endpoint}/api/v1/hybrid/user/${userId}/org/${orgId}/roles`,
             await tokenManager.getAuthHeader()
         );
         return response.data.data ?? [];
@@ -184,7 +184,7 @@ export async function getRoleResourceAccess(
     try {
         const response = await axios.get(
             `${config.getRawConfig().managed?.endpoint}/api/v1/hybrid/resource/${resourceId}/access`,
-            { ...await tokenManager.getAuthHeader(), params: { roleIds: roleIds } }
+            { ...await tokenManager.getAuthHeader(), params: { roleIds }, paramsSerializer: { indexes: null } }
         );
         return response.data.data;
     } catch (error) {

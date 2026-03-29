@@ -941,6 +941,9 @@ async function isUserAllowedToAccessResource(
     const result = await getUserSessionWithUser(userSessionId);
 
     if (!result) {
+        logger.debug(`++++++++++++++++++++++User session not found`, {
+            userSessionId
+        });
         return null;
     }
 
@@ -960,6 +963,13 @@ async function isUserAllowedToAccessResource(
     const userOrgRoles = await getUserOrgRoles(user.userId, resource.orgId);
 
     if (!userOrgRoles.length) {
+        logger.debug(
+            `++++++++++++++++++++++User does not have any roles in the org`,
+            {
+                userId: user.userId,
+                orgId: resource.orgId
+            }
+        );
         return null;
     }
 
@@ -986,6 +996,15 @@ async function isUserAllowedToAccessResource(
             name: user.name,
             role: userOrgRoles.map((r) => r.roleName).join(", ")
         };
+    } else {
+        logger.debug(
+            `++++++++++++++++++++++User's roles do not have access to the resource`,
+            {
+                userId: user.userId,
+                resourceId: resource.resourceId,
+                roleIds: userOrgRoles.map((r) => r.roleId)
+            }
+        );
     }
 
     const userResourceAccess = await getUserResourceAccess(
@@ -1000,6 +1019,11 @@ async function isUserAllowedToAccessResource(
             name: user.name,
             role: userOrgRoles.map((r) => r.roleName).join(", ")
         };
+    } else {
+        logger.debug(
+            `++++++++++++++++++++++User does not have direct access to the resource`,
+            { userId: user.userId, resourceId: resource.resourceId }
+        );
     }
 
     return null;
