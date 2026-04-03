@@ -2,15 +2,16 @@ import { validateResourceSessionToken } from "@server/auth/sessions/resource";
 import {
     getResourceByDomain,
     getResourceRules,
+    getRoleName,
     getRoleResourceAccess,
-    getUserOrgRole,
+    getUserOrgRoleIds as getUserOrgRoles,
     getUserResourceAccess,
     getOrgLoginPage,
     getUserSessionWithUser,
     checkOrgAccessPolicy
 } from "@server/routers/ws/verifySessionQueries";
 import config from "@server/lib/config";
-import { isIpInCidr } from "@server/lib/ip";
+import { isIpInCidr, stripPortFromHost } from "@server/lib/ip";
 import { response } from "@server/lib/response";
 import logger from "@server/logger";
 import HttpCode from "@server/types/HttpCode";
@@ -33,14 +34,14 @@ import {
 import { verifyResourceAccessToken } from "@server/auth/verifyResourceAccessToken";
 import { logRequestAudit } from "./logRequestAudit";
 import { remoteGetASNForIp } from "@server/lib/asn";
-import semver from "semver";
 import { APP_VERSION } from "@server/lib/consts";
 import { enforceResourceSessionLength } from "@server/lib/checkOrgAccessPolicy";
+import { REGIONS } from "@server/db/regions";
 
 const APP_VERSION_PREPEND = `remote-${APP_VERSION}`;
 
 // We'll see if this speeds anything up
-const cache = new NodeCache({
+const localCache = new NodeCache({
     stdTTL: 5 // seconds
 });
 
@@ -111,38 +112,7 @@ export async function verifyResourceSession(
         const clientHeaderAuth = extractBasicAuth(headers);
 
         const clientIp = requestIp
-            ? (() => {
-                  logger.debug("Request IP:", { requestIp });
-                  const isNewerBadger =
-                      badgerVersion &&
-                      semver.valid(badgerVersion) &&
-                      semver.gte(badgerVersion, "1.3.1");
-
-                  if (isNewerBadger) {
-                      return requestIp;
-                  }
-
-                  if (requestIp.startsWith("[") && requestIp.includes("]")) {
-                      // if brackets are found, extract the IPv6 address from between the brackets
-                      const ipv6Match = requestIp.match(/\[(.*?)\]/);
-                      if (ipv6Match) {
-                          return ipv6Match[1];
-                      }
-                  }
-
-                  // Check if it looks like IPv4 (contains dots and matches IPv4 pattern)
-                  // IPv4 format: x.x.x.x where x is 0-255
-                  const ipv4Pattern = /^(\d{1,3}\.){3}\d{1,3}/;
-                  if (ipv4Pattern.test(requestIp)) {
-                      const lastColonIndex = requestIp.lastIndexOf(":");
-                      if (lastColonIndex !== -1) {
-                          return requestIp.substring(0, lastColonIndex);
-                      }
-                  }
-
-                  // Return as is
-                  return requestIp;
-              })()
+            ? stripPortFromHost(requestIp, badgerVersion)
             : undefined;
 
         logger.debug("Client IP:", { clientIp });
@@ -170,7 +140,7 @@ export async function verifyResourceSession(
                   headerAuthExtendedCompatibility: ResourceHeaderAuthExtendedCompatibility | null;
                   org: Org;
               }
-            | undefined = cache.get(resourceCacheKey);
+            | undefined = localCache.get(resourceCacheKey);
 
         if (!resourceData) {
             const result = await getResourceByDomain(cleanHost);
@@ -194,7 +164,7 @@ export async function verifyResourceSession(
             }
 
             resourceData = result;
-            cache.set(resourceCacheKey, resourceData, 5);
+            localCache.set(resourceCacheKey, resourceData, 5);
         }
 
         const {
@@ -436,7 +406,7 @@ export async function verifyResourceSession(
         // check for HTTP Basic Auth header
         const clientHeaderAuthKey = `headerAuth:${clientHeaderAuth}`;
         if (headerAuth && clientHeaderAuth) {
-            if (cache.get(clientHeaderAuthKey)) {
+            if (localCache.get(clientHeaderAuthKey)) {
                 logger.debug(
                     "Resource allowed because header auth is valid (cached)"
                 );
@@ -459,7 +429,7 @@ export async function verifyResourceSession(
                     headerAuth.headerAuthHash
                 )
             ) {
-                cache.set(clientHeaderAuthKey, clientHeaderAuth, 5);
+                localCache.set(clientHeaderAuthKey, clientHeaderAuth, 5);
                 logger.debug("Resource allowed because header auth is valid");
 
                 logRequestAudit(
@@ -551,7 +521,7 @@ export async function verifyResourceSession(
 
         if (resourceSessionToken) {
             const sessionCacheKey = `session:${resourceSessionToken}`;
-            let resourceSession: any = cache.get(sessionCacheKey);
+            let resourceSession: any = localCache.get(sessionCacheKey);
 
             if (!resourceSession) {
                 const result = await validateResourceSessionToken(
@@ -560,7 +530,7 @@ export async function verifyResourceSession(
                 );
 
                 resourceSession = result?.resourceSession;
-                cache.set(sessionCacheKey, resourceSession, 5);
+                localCache.set(sessionCacheKey, resourceSession, 5);
             }
 
             if (resourceSession?.isRequestToken) {
@@ -693,7 +663,7 @@ export async function verifyResourceSession(
                     }:${resource.resourceId}`;
 
                     let allowedUserData: BasicUserData | null | undefined =
-                        cache.get(userAccessCacheKey);
+                        localCache.get(userAccessCacheKey);
 
                     if (allowedUserData === undefined) {
                         allowedUserData = await isUserAllowedToAccessResource(
@@ -702,7 +672,7 @@ export async function verifyResourceSession(
                             resourceData.org
                         );
 
-                        cache.set(userAccessCacheKey, allowedUserData, 5);
+                        localCache.set(userAccessCacheKey, allowedUserData, 5);
                     }
 
                     if (
@@ -940,6 +910,9 @@ async function isUserAllowedToAccessResource(
     const result = await getUserSessionWithUser(userSessionId);
 
     if (!result) {
+        logger.debug(`User session not found`, {
+            userSessionId
+        });
         return null;
     }
 
@@ -956,9 +929,13 @@ async function isUserAllowedToAccessResource(
         return null;
     }
 
-    const userOrgRole = await getUserOrgRole(user.userId, resource.orgId);
+    const userOrgRoles = await getUserOrgRoles(user.userId, resource.orgId);
 
-    if (!userOrgRole) {
+    if (!userOrgRoles.length) {
+        logger.debug(`User does not have any roles in the org`, {
+            userId: user.userId,
+            orgId: resource.orgId
+        });
         return null;
     }
 
@@ -976,16 +953,21 @@ async function isUserAllowedToAccessResource(
 
     const roleResourceAccess = await getRoleResourceAccess(
         resource.resourceId,
-        userOrgRole.roleId
+        userOrgRoles.map((r) => r.roleId)
     );
-
-    if (roleResourceAccess) {
+    if (roleResourceAccess && roleResourceAccess.length > 0) {
         return {
             username: user.username,
             email: user.email,
             name: user.name,
-            role: user.role
+            role: userOrgRoles.map((r) => r.roleName).join(", ")
         };
+    } else {
+        logger.debug(`User's roles do not have access to the resource`, {
+            userId: user.userId,
+            resourceId: resource.resourceId,
+            roleIds: userOrgRoles.map((r) => r.roleId)
+        });
     }
 
     const userResourceAccess = await getUserResourceAccess(
@@ -998,8 +980,13 @@ async function isUserAllowedToAccessResource(
             username: user.username,
             email: user.email,
             name: user.name,
-            role: user.role
+            role: userOrgRoles.map((r) => r.roleName).join(", ")
         };
+    } else {
+        logger.debug(`User does not have direct access to the resource`, {
+            userId: user.userId,
+            resourceId: resource.resourceId
+        });
     }
 
     return null;
@@ -1014,11 +1001,11 @@ async function checkRules(
 ): Promise<"ACCEPT" | "DROP" | "PASS" | undefined> {
     const ruleCacheKey = `rules:${resourceId}`;
 
-    let rules: ResourceRule[] | undefined = cache.get(ruleCacheKey);
+    let rules: ResourceRule[] | undefined = localCache.get(ruleCacheKey);
 
     if (!rules) {
         rules = await getResourceRules(resourceId);
-        cache.set(ruleCacheKey, rules, 5);
+        localCache.set(ruleCacheKey, rules, 5);
     }
 
     if (rules.length === 0) {
@@ -1049,7 +1036,7 @@ async function checkRules(
         ) {
             return rule.action as any;
         } else if (
-            ipCC &&
+            clientIp &&
             rule.match == "COUNTRY" &&
             (await isIpInGeoIP(ipCC, rule.value))
         ) {
@@ -1058,6 +1045,12 @@ async function checkRules(
             clientIp &&
             rule.match == "ASN" &&
             (await isIpInAsn(ipAsn, rule.value))
+        ) {
+            return rule.action as any;
+        } else if (
+            clientIp &&
+            rule.match == "REGION" &&
+            (await isIpInRegion(ipCC, rule.value))
         ) {
             return rule.action as any;
         }
@@ -1077,14 +1070,29 @@ export function isPathAllowed(pattern: string, path: string): boolean {
     logger.debug(`Normalized pattern parts: [${patternParts.join(", ")}]`);
     logger.debug(`Normalized path parts: [${pathParts.join(", ")}]`);
 
+    // Maximum recursion depth to prevent stack overflow and memory issues
+    const MAX_RECURSION_DEPTH = 100;
+
     // Recursive function to try different wildcard matches
-    function matchSegments(patternIndex: number, pathIndex: number): boolean {
-        const indent = "  ".repeat(pathIndex); // Indent based on recursion depth
+    function matchSegments(
+        patternIndex: number,
+        pathIndex: number,
+        depth: number = 0
+    ): boolean {
+        // Check recursion depth limit
+        if (depth > MAX_RECURSION_DEPTH) {
+            logger.warn(
+                `Path matching exceeded maximum recursion depth (${MAX_RECURSION_DEPTH}) for pattern "${pattern}" and path "${path}"`
+            );
+            return false;
+        }
+
+        const indent = "  ".repeat(depth); // Indent based on recursion depth
         const currentPatternPart = patternParts[patternIndex];
         const currentPathPart = pathParts[pathIndex];
 
         logger.debug(
-            `${indent}Checking patternIndex=${patternIndex} (${currentPatternPart || "END"}) vs pathIndex=${pathIndex} (${currentPathPart || "END"})`
+            `${indent}Checking patternIndex=${patternIndex} (${currentPatternPart || "END"}) vs pathIndex=${pathIndex} (${currentPathPart || "END"}) [depth=${depth}]`
         );
 
         // If we've consumed all pattern parts, we should have consumed all path parts
@@ -1117,7 +1125,7 @@ export function isPathAllowed(pattern: string, path: string): boolean {
             logger.debug(
                 `${indent}Trying to skip wildcard (consume 0 segments)`
             );
-            if (matchSegments(patternIndex + 1, pathIndex)) {
+            if (matchSegments(patternIndex + 1, pathIndex, depth + 1)) {
                 logger.debug(
                     `${indent}Successfully matched by skipping wildcard`
                 );
@@ -1128,7 +1136,7 @@ export function isPathAllowed(pattern: string, path: string): boolean {
             logger.debug(
                 `${indent}Trying to consume segment "${currentPathPart}" for wildcard`
             );
-            if (matchSegments(patternIndex, pathIndex + 1)) {
+            if (matchSegments(patternIndex, pathIndex + 1, depth + 1)) {
                 logger.debug(
                     `${indent}Successfully matched by consuming segment for wildcard`
                 );
@@ -1156,7 +1164,11 @@ export function isPathAllowed(pattern: string, path: string): boolean {
                 logger.debug(
                     `${indent}Segment with wildcard matches: "${currentPatternPart}" matches "${currentPathPart}"`
                 );
-                return matchSegments(patternIndex + 1, pathIndex + 1);
+                return matchSegments(
+                    patternIndex + 1,
+                    pathIndex + 1,
+                    depth + 1
+                );
             }
 
             logger.debug(
@@ -1177,23 +1189,21 @@ export function isPathAllowed(pattern: string, path: string): boolean {
             `${indent}Segments match: "${currentPatternPart}" = "${currentPathPart}"`
         );
         // Move to next segments in both pattern and path
-        return matchSegments(patternIndex + 1, pathIndex + 1);
+        return matchSegments(patternIndex + 1, pathIndex + 1, depth + 1);
     }
 
-    const result = matchSegments(0, 0);
+    const result = matchSegments(0, 0, 0);
     logger.debug(`Final result: ${result}`);
     return result;
 }
 
 async function isIpInGeoIP(
-    ipCountryCode: string,
+    ipCountryCode: string | undefined,
     checkCountryCode: string
 ): Promise<boolean> {
     if (checkCountryCode == "ALL") {
         return true;
     }
-
-    logger.debug(`IP ${ipCountryCode} is in country: ${checkCountryCode}`);
 
     return ipCountryCode?.toUpperCase() === checkCountryCode.toUpperCase();
 }
@@ -1228,16 +1238,63 @@ async function isIpInAsn(
     return match;
 }
 
+export async function isIpInRegion(
+    ipCountryCode: string | undefined,
+    checkRegionCode: string
+): Promise<boolean> {
+    if (!ipCountryCode) {
+        return false;
+    }
+
+    const upperCode = ipCountryCode.toUpperCase();
+
+    for (const region of REGIONS) {
+        // Check if it's a top-level region (continent)
+        if (region.id === checkRegionCode) {
+            for (const subregion of region.includes) {
+                if (subregion.countries.includes(upperCode)) {
+                    logger.debug(
+                        `Country ${upperCode} is in region ${region.id} (${region.name})`
+                    );
+                    return true;
+                }
+            }
+            logger.debug(
+                `Country ${upperCode} is not in region ${region.id} (${region.name})`
+            );
+            return false;
+        }
+
+        // Check subregions
+        for (const subregion of region.includes) {
+            if (subregion.id === checkRegionCode) {
+                if (subregion.countries.includes(upperCode)) {
+                    logger.debug(
+                        `Country ${upperCode} is in region ${subregion.id} (${subregion.name})`
+                    );
+                    return true;
+                }
+                logger.debug(
+                    `Country ${upperCode} is not in region ${subregion.id} (${subregion.name})`
+                );
+                return false;
+            }
+        }
+    }
+
+    return false;
+}
+
 async function getAsnFromIp(ip: string): Promise<number | undefined> {
     const asnCacheKey = `asn:${ip}`;
 
-    let cachedAsn: number | undefined = cache.get(asnCacheKey);
+    let cachedAsn: number | undefined = localCache.get(asnCacheKey);
 
     if (!cachedAsn) {
         cachedAsn = await remoteGetASNForIp(ip); // do it locally
         // Cache for longer since IP ASN doesn't change frequently
         if (cachedAsn) {
-            cache.set(asnCacheKey, cachedAsn, 300); // 5 minutes
+            localCache.set(asnCacheKey, cachedAsn, 300); // 5 minutes
         }
     }
 
@@ -1247,12 +1304,15 @@ async function getAsnFromIp(ip: string): Promise<number | undefined> {
 async function getCountryCodeFromIp(ip: string): Promise<string | undefined> {
     const geoIpCacheKey = `geoip:${ip}`;
 
-    let cachedCountryCode: string | undefined = cache.get(geoIpCacheKey);
+    let cachedCountryCode: string | undefined = localCache.get(geoIpCacheKey);
 
     if (!cachedCountryCode) {
         cachedCountryCode = await remoteGetCountryCodeForIp(ip); // do it locally
-        // Cache for longer since IP geolocation doesn't change frequently
-        cache.set(geoIpCacheKey, cachedCountryCode, 300); // 5 minutes
+        // Only cache successful lookups to avoid filling cache with undefined values
+        if (cachedCountryCode) {
+            // Cache for longer since IP geolocation doesn't change frequently
+            localCache.set(geoIpCacheKey, cachedCountryCode, 300); // 5 minutes
+        }
     }
 
     return cachedCountryCode;
