@@ -4,7 +4,7 @@ A remote node for Pangolin to support scaling and HA. This container serves as a
 
 Remote nodes are used with the Pangolin Cloud and Pangolin Enterprise.
 
-Take a look at the [docs](https://docs.pangolin.net/manage/remote-node/nodes) for more information on Pangolin Remote Nodes.
+Take a look at the [docs](https://docs.pangolin.net/manage/remote-node/understanding-nodes) for more information on Pangolin Remote Nodes.
 
 For the Pangolin repository, see [here](https://github.com/fosrl/pangolin).
 
