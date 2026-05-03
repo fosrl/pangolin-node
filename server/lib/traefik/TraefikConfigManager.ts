@@ -527,6 +527,24 @@ export class TraefikConfigManager {
                         if (match && match[1]) {
                             domains.add(match[1]);
                         }
+                        // Match HostRegexp(`^[^.]+\.parent.domain$`) generated for wildcard resources
+                        const hostRegexpMatch = router.rule.match(
+                            /HostRegexp\(`([^`]+)`\)/
+                        );
+                        if (hostRegexpMatch && hostRegexpMatch[1]) {
+                            const innerRegex = hostRegexpMatch[1];
+                            // Pattern is always ^[^.]+\.PARENT_DOMAIN$ where dots are escaped as \.
+                            const domainMatch = innerRegex.match(
+                                /^\^\[\^\.\]\+\\\.(.+)\$$/
+                            );
+                            if (domainMatch && domainMatch[1]) {
+                                const parentDomain = domainMatch[1].replace(
+                                    /\\\./g,
+                                    "."
+                                );
+                                domains.add(`*.${parentDomain}`);
+                            }
+                        }
                     }
                 }
             }
