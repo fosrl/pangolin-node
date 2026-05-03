@@ -1027,7 +1027,11 @@ async function checkRules(
             isIpInCidr(clientIp, rule.value)
         ) {
             return rule.action as any;
-        } else if (clientIp && rule.match == "IP" && clientIp == rule.value) {
+        } else if (
+            clientIp &&
+            rule.match == "IP" &&
+            clientIp == rule.value
+        ) {
             return rule.action as any;
         } else if (
             path &&
@@ -1037,16 +1041,35 @@ async function checkRules(
             return rule.action as any;
         } else if (
             clientIp &&
-            rule.match == "COUNTRY" &&
-            (await isIpInGeoIP(ipCC, rule.value))
+            rule.match == "COUNTRY"
         ) {
-            return rule.action as any;
+            // COUNTRY=ALL should not affect local/private/CGNAT addresses.
+            if (
+                rule.value.toUpperCase() === "ALL" &&
+                isLocalOrCarrierGradeNatIp(clientIp)
+            ) {
+                continue;
+            }
+
+            if (await isIpInGeoIP(ipCC, rule.value)) {
+                return rule.action as any;
+            }
         } else if (
             clientIp &&
-            rule.match == "ASN" &&
-            (await isIpInAsn(ipAsn, rule.value))
+            rule.match == "ASN"
         ) {
-            return rule.action as any;
+            // ASN=ALL/AS0 should not affect local/private/CGNAT addresses.
+            if (
+                (rule.value.toUpperCase() === "ALL" ||
+                    rule.value.toUpperCase() === "AS0") &&
+                isLocalOrCarrierGradeNatIp(clientIp)
+            ) {
+                continue;
+            }
+
+            if (await isIpInAsn(ipAsn, rule.value)) {
+                return rule.action as any;
+            }
         } else if (
             clientIp &&
             rule.match == "REGION" &&
@@ -1206,6 +1229,26 @@ async function isIpInGeoIP(
     }
 
     return ipCountryCode?.toUpperCase() === checkCountryCode.toUpperCase();
+}
+
+function isLocalOrCarrierGradeNatIp(ip: string): boolean {
+    const localAndCgnatCidrs = [
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "100.64.0.0/10",
+        "127.0.0.0/8",
+        "169.254.0.0/16",
+        "::1/128",
+        "fc00::/7",
+        "fe80::/10"
+    ];
+
+    try {
+        return localAndCgnatCidrs.some((cidr) => isIpInCidr(ip, cidr));
+    } catch {
+        return false;
+    }
 }
 
 async function isIpInAsn(
