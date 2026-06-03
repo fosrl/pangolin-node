@@ -138,6 +138,7 @@ export async function verifyResourceSession(
                   password: ResourcePassword | null;
                   headerAuth: ResourceHeaderAuth | null;
                   headerAuthExtendedCompatibility: ResourceHeaderAuthExtendedCompatibility | null;
+                  applyRules: boolean;
                   org: Org;
               }
             | undefined = localCache.get(resourceCacheKey);
@@ -169,6 +170,7 @@ export async function verifyResourceSession(
 
         const {
             resource,
+            applyRules,
             pincode,
             password,
             headerAuth,
@@ -213,7 +215,7 @@ export async function verifyResourceSession(
         }
 
         // check the rules
-        if (resource.applyRules) {
+        if (applyRules) {
             const action = await checkRules(
                 resource.resourceId,
                 clientIp,

@@ -19,6 +19,7 @@ export type ResourceWithAuth = {
     password: ResourcePassword | null;
     headerAuth: ResourceHeaderAuth | null;
     headerAuthExtendedCompatibility: ResourceHeaderAuthExtendedCompatibility | null;
+    applyRules: boolean;
     org: Org;
 };
 
