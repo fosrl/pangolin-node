@@ -20,6 +20,8 @@ export type ResourceWithAuth = {
     headerAuth: ResourceHeaderAuth | null;
     headerAuthExtendedCompatibility: ResourceHeaderAuthExtendedCompatibility | null;
     applyRules: boolean;
+    sso: boolean;
+    emailWhitelistEnabled: boolean;
     org: Org;
 };
 

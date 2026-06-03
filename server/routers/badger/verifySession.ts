@@ -139,6 +139,8 @@ export async function verifyResourceSession(
                   headerAuth: ResourceHeaderAuth | null;
                   headerAuthExtendedCompatibility: ResourceHeaderAuthExtendedCompatibility | null;
                   applyRules: boolean;
+                  sso: boolean;
+                  emailWhitelistEnabled: boolean;
                   org: Org;
               }
             | undefined = localCache.get(resourceCacheKey);
@@ -171,6 +173,8 @@ export async function verifyResourceSession(
         const {
             resource,
             applyRules,
+            sso,
+            emailWhitelistEnabled,
             pincode,
             password,
             headerAuth,
@@ -195,7 +199,7 @@ export async function verifyResourceSession(
             return notAllowed(res);
         }
 
-        const { sso, blockAccess } = resource;
+        const { blockAccess } = resource;
 
         if (blockAccess) {
             logger.debug("Resource blocked", host);
@@ -270,7 +274,7 @@ export async function verifyResourceSession(
             !sso &&
             !pincode &&
             !password &&
-            !resource.emailWhitelistEnabled &&
+            !emailWhitelistEnabled &&
             !headerAuth
         ) {
             logger.debug("Resource allowed because no auth");
@@ -453,7 +457,7 @@ export async function verifyResourceSession(
                 !sso &&
                 !pincode &&
                 !password &&
-                !resource.emailWhitelistEnabled &&
+                !emailWhitelistEnabled &&
                 !headerAuthExtendedCompatibility?.extendedCompatibilityIsActivated
             ) {
                 logRequestAudit(
@@ -475,7 +479,7 @@ export async function verifyResourceSession(
                 !sso &&
                 !pincode &&
                 !password &&
-                !resource.emailWhitelistEnabled &&
+                !emailWhitelistEnabled &&
                 !headerAuthExtendedCompatibility?.extendedCompatibilityIsActivated
             ) {
                 logRequestAudit(
@@ -614,10 +618,7 @@ export async function verifyResourceSession(
                     return allowed(res);
                 }
 
-                if (
-                    resource.emailWhitelistEnabled &&
-                    resourceSession.whitelistId
-                ) {
+                if (emailWhitelistEnabled && resourceSession.whitelistId) {
                     logger.debug(
                         "Resource allowed because whitelist session is valid"
                     );
@@ -1029,11 +1030,7 @@ async function checkRules(
             isIpInCidr(clientIp, rule.value)
         ) {
             return rule.action as any;
-        } else if (
-            clientIp &&
-            rule.match == "IP" &&
-            clientIp == rule.value
-        ) {
+        } else if (clientIp && rule.match == "IP" && clientIp == rule.value) {
             return rule.action as any;
         } else if (
             path &&
@@ -1041,10 +1038,7 @@ async function checkRules(
             isPathAllowed(rule.value, path)
         ) {
             return rule.action as any;
-        } else if (
-            clientIp &&
-            rule.match == "COUNTRY"
-        ) {
+        } else if (clientIp && rule.match == "COUNTRY") {
             // COUNTRY=ALL should not affect local/private/CGNAT addresses.
             if (
                 rule.value.toUpperCase() === "ALL" &&
@@ -1056,10 +1050,7 @@ async function checkRules(
             if (await isIpInGeoIP(ipCC, rule.value)) {
                 return rule.action as any;
             }
-        } else if (
-            clientIp &&
-            rule.match == "ASN"
-        ) {
+        } else if (clientIp && rule.match == "ASN") {
             // ASN=ALL/AS0 should not affect local/private/CGNAT addresses.
             if (
                 (rule.value.toUpperCase() === "ALL" ||
