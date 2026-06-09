@@ -29,7 +29,8 @@ import {
     ResourceHeaderAuthExtendedCompatibility,
     ResourcePassword,
     ResourcePincode,
-    ResourceRule
+    ResourceRule,
+    ResourceSession
 } from "@server/lib/types";
 import { verifyResourceAccessToken } from "@server/auth/verifyResourceAccessToken";
 import { logRequestAudit } from "./logRequestAudit";
@@ -64,6 +65,7 @@ export type VerifyResourceSessionSchema = z.infer<
 >;
 
 type BasicUserData = {
+    userId: string;
     username: string;
     email: string | null;
     name: string | null;
@@ -174,10 +176,10 @@ export async function verifyResourceSession(
             resource,
             applyRules,
             sso,
-            emailWhitelistEnabled,
             pincode,
             password,
             headerAuth,
+            emailWhitelistEnabled,
             headerAuthExtendedCompatibility
         } = resourceData;
 
@@ -527,7 +529,8 @@ export async function verifyResourceSession(
 
         if (resourceSessionToken) {
             const sessionCacheKey = `session:${resourceSessionToken}`;
-            let resourceSession: any = localCache.get(sessionCacheKey);
+            let resourceSession: ResourceSession | null | undefined =
+                localCache.get(sessionCacheKey);
 
             if (!resourceSession) {
                 const result = await validateResourceSessionToken(
@@ -580,7 +583,11 @@ export async function verifyResourceSession(
                     return notAllowed(res, redirectPath, resource.orgId);
                 }
 
-                if (pincode && resourceSession.pincodeId) {
+                if (
+                    pincode &&
+                    (resourceSession.pincodeId ||
+                        resourceSession.policyPincodeId)
+                ) {
                     logger.debug(
                         "Resource allowed because pincode session is valid"
                     );
@@ -599,7 +606,11 @@ export async function verifyResourceSession(
                     return allowed(res);
                 }
 
-                if (password && resourceSession.passwordId) {
+                if (
+                    password &&
+                    (resourceSession.passwordId ||
+                        resourceSession.policyPasswordId)
+                ) {
                     logger.debug(
                         "Resource allowed because password session is valid"
                     );
@@ -618,7 +629,11 @@ export async function verifyResourceSession(
                     return allowed(res);
                 }
 
-                if (emailWhitelistEnabled && resourceSession.whitelistId) {
+                if (
+                    emailWhitelistEnabled &&
+                    (resourceSession.whitelistId ||
+                        resourceSession.policyWhitelistId)
+                ) {
                     logger.debug(
                         "Resource allowed because whitelist session is valid"
                     );
@@ -650,7 +665,7 @@ export async function verifyResourceSession(
                             orgId: resource.orgId,
                             location: ipCC,
                             apiKey: {
-                                name: resourceSession.accessTokenTitle,
+                                name: null,
                                 apiKeyId: resourceSession.accessTokenId
                             }
                         },
@@ -695,7 +710,7 @@ export async function verifyResourceSession(
                                 location: ipCC,
                                 user: {
                                     username: allowedUserData.username,
-                                    userId: resourceSession.userId
+                                    userId: allowedUserData.userId
                                 }
                             },
                             parsedBody.data
@@ -960,6 +975,7 @@ async function isUserAllowedToAccessResource(
     );
     if (roleResourceAccess && roleResourceAccess.length > 0) {
         return {
+            userId: user.userId,
             username: user.username,
             email: user.email,
             name: user.name,
@@ -980,6 +996,7 @@ async function isUserAllowedToAccessResource(
 
     if (userResourceAccess) {
         return {
+            userId: user.userId,
             username: user.username,
             email: user.email,
             name: user.name,

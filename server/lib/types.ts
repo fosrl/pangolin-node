@@ -47,7 +47,7 @@ export type ResourceHeaderAuthExtendedCompatibility = {
     resourceId: number;
     headerAuthExtendedCompatibilityId: number;
     extendedCompatibilityIsActivated: boolean;
-}
+};
 
 export type Org = {
     name: string;
@@ -61,7 +61,7 @@ export type Org = {
     settingsLogRetentionDaysRequest: number;
     settingsLogRetentionDaysAccess: number;
     settingsLogRetentionDaysAction: number;
-}
+};
 
 export type LoginPage = {
     loginPageId: number;
@@ -103,6 +103,9 @@ export type ResourceSession = {
     accessTokenId: string | null;
     isRequestToken: boolean;
     userSessionId: string | null;
+    policyPasswordId: number | null;
+    policyPincodeId: number | null;
+    policyWhitelistId: number | null;
     issuedAt: number | null;
 };
 
