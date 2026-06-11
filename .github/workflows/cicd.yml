@@ -67,7 +67,7 @@ jobs:
                   make go-build-release 
 
             - name: Upload artifacts from /install/bin
-              uses: actions/upload-artifact@v6
+              uses: actions/upload-artifact@v7
               with:
                   name: install-bin
                   path: install/bin/
