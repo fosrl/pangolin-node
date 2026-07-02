@@ -230,7 +230,7 @@ export async function verifyResourceSession(
                 ipAsn
             );
 
-            if (action == "ACCEPT") {
+            if (action === "ACCEPT") {
                 logger.debug("Resource allowed by rule");
 
                 logRequestAudit(
@@ -245,7 +245,7 @@ export async function verifyResourceSession(
                 );
 
                 return allowed(res);
-            } else if (action == "DROP") {
+            } else if (action === "DROP") {
                 logger.debug("Resource denied by rule");
 
                 // TODO: add rules type
@@ -261,7 +261,7 @@ export async function verifyResourceSession(
                 );
 
                 return notAllowed(res);
-            } else if (action == "PASS") {
+            } else if (action === "PASS") {
                 logger.debug(
                     "Resource passed by rule, continuing to auth checks"
                 );
@@ -1043,19 +1043,19 @@ async function checkRules(
 
         if (
             clientIp &&
-            rule.match == "CIDR" &&
+            rule.match === "CIDR" &&
             isIpInCidr(clientIp, rule.value)
         ) {
             return rule.action as any;
-        } else if (clientIp && rule.match == "IP" && clientIp == rule.value) {
+        } else if (clientIp && rule.match === "IP" && clientIp === rule.value) {
             return rule.action as any;
         } else if (
             path &&
-            rule.match == "PATH" &&
+            rule.match === "PATH" &&
             isPathAllowed(rule.value, path)
         ) {
             return rule.action as any;
-        } else if (clientIp && rule.match == "COUNTRY") {
+        } else if (clientIp && (rule.match === "COUNTRY" || rule.match === "COUNTRY_IS_NOT")) {
             // COUNTRY=ALL should not affect local/private/CGNAT addresses.
             if (
                 rule.value.toUpperCase() === "ALL" &&
@@ -1064,10 +1064,13 @@ async function checkRules(
                 continue;
             }
 
-            if (await isIpInGeoIP(ipCC, rule.value)) {
+            const inCountry = await isIpInGeoIP(ipCC, rule.value);
+            const matched = rule.match === "COUNTRY" ? inCountry : !inCountry;
+
+            if (matched) {
                 return rule.action as any;
             }
-        } else if (clientIp && rule.match == "ASN") {
+        } else if (clientIp && rule.match === "ASN") {
             // ASN=ALL/AS0 should not affect local/private/CGNAT addresses.
             if (
                 (rule.value.toUpperCase() === "ALL" ||
@@ -1082,7 +1085,7 @@ async function checkRules(
             }
         } else if (
             clientIp &&
-            rule.match == "REGION" &&
+            rule.match === "REGION" &&
             (await isIpInRegion(ipCC, rule.value))
         ) {
             return rule.action as any;
@@ -1234,7 +1237,7 @@ async function isIpInGeoIP(
     ipCountryCode: string | undefined,
     checkCountryCode: string
 ): Promise<boolean> {
-    if (checkCountryCode == "ALL") {
+    if (checkCountryCode === "ALL") {
         return true;
     }
 
