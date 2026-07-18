@@ -413,7 +413,7 @@ export async function verifyResourceSession(
         }
 
         // check for HTTP Basic Auth header
-        const clientHeaderAuthKey = `headerAuth:${clientHeaderAuth}`;
+        const clientHeaderAuthKey = `headerAuth:${resource.resourceId}:${clientHeaderAuth}`;
         if (headerAuth && clientHeaderAuth) {
             if (localCache.get(clientHeaderAuthKey)) {
                 logger.debug(
