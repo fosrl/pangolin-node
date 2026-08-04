@@ -122,6 +122,9 @@ export async function verifyResourceSession(
         // Extract HTTP Basic Auth credentials if present
         const clientHeaderAuth = extractBasicAuth(headers);
 
+        const clientUserAgent = headers?.["user-agent"] || headers?.["User-Agent"];
+        const clientIsBrowser = isBrowserUserAgent(clientUserAgent);
+
         const clientIp = requestIp
             ? stripPortFromHost(requestIp, badgerVersion)
             : undefined;
@@ -304,9 +307,14 @@ export async function verifyResourceSession(
             return allowed(res);
         }
 
-        const redirectPath = `/auth/resource/${encodeURIComponent(
-            resource.resourceGuid
-        )}?redirect=${encodeURIComponent(originalRequestURL)}`;
+        // Only offer a browser redirect to clients that can actually follow one and log in
+        // (an interactive browser). Non-browser clients (curl, scripts, bots, etc.) just get
+        // an unauthorized response from Badger instead of a login redirect URL.
+        const redirectPath = clientIsBrowser
+            ? `/auth/resource/${encodeURIComponent(
+                  resource.resourceGuid
+              )}?redirect=${encodeURIComponent(originalRequestURL)}`
+            : undefined;
 
         // check for access token in headers
         if (
@@ -1583,6 +1591,46 @@ async function getCountryCodeFromIp(ip: string): Promise<string | undefined> {
     }
 
     return cachedCountryCode;
+}
+
+// Permissive by default: only reject known non-browser clients or a missing
+// User-Agent (real browsers always send one). This avoids blocking real
+// browsers whose UA string doesn't match a hardcoded allow-list.
+const NON_BROWSER_USER_AGENT_PATTERNS = [
+    /curl/,
+    /wget/,
+    /python-requests/,
+    /python-urllib/,
+    /go-http-client/,
+    /okhttp/,
+    /axios/,
+    /node-fetch/,
+    /postmanruntime/,
+    /insomnia/,
+    /libwww-perl/,
+    /java\//,
+    /ruby/,
+    /php/,
+    /bot/,
+    /spider/,
+    /crawler/,
+    /headlesschrome/,
+    /phantomjs/,
+    /httpclient/,
+    /prometheus/,
+    /go-resty/,
+    /apache-httpclient/,
+    /scrapy/
+];
+
+function isBrowserUserAgent(userAgent: string | undefined): boolean {
+    if (!userAgent) {
+        return false;
+    }
+
+    const ua = userAgent.toLowerCase();
+
+    return !NON_BROWSER_USER_AGENT_PATTERNS.some((pattern) => pattern.test(ua));
 }
 
 function extractBasicAuth(
