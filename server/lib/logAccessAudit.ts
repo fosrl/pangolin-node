@@ -15,6 +15,10 @@ export async function logAccessAudit(data: {
     userAgent?: string;
     requestIp?: string;
 }) {
+    if (!config.getRawConfig().app.audit_logging_enabled) {
+        return;
+    }
+
     try {
         const endpoint = config.getRawConfig().managed?.endpoint;
         if (!endpoint) {
