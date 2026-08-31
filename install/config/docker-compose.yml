@@ -37,7 +37,7 @@ services:
       - 80:80
 
   traefik:
-    image: docker.io/traefik:v3.5
+    image: docker.io/traefik:v3.7
     container_name: traefik
     restart: unless-stopped
     network_mode: service:gerbil

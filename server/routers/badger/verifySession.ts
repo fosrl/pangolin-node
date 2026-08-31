@@ -1,4 +1,7 @@
-import { validateResourceSessionToken } from "@server/auth/sessions/resource";
+import {
+    validateResourceSessionToken,
+    createAccessTokenResourceSession
+} from "@server/auth/sessions/resource";
 import {
     getResourceByDomain,
     getResourceRules,
@@ -25,6 +28,8 @@ import { verifyPassword } from "@server/auth/password";
 import {
     Org,
     Resource,
+    ResourceAccessToken,
+    AccessTokenUserData,
     ResourceHeaderAuth,
     ResourceHeaderAuthExtendedCompatibility,
     ResourcePassword,
@@ -32,8 +37,12 @@ import {
     ResourceRule,
     ResourceSession
 } from "@server/lib/types";
-import { verifyResourceAccessToken } from "@server/auth/verifyResourceAccessToken";
+import {
+    getResourceAccessToken,
+    verifyResourceAccessToken
+} from "@server/auth/verifyResourceAccessToken";
 import { logRequestAudit } from "./logRequestAudit";
+import { logAccessAudit } from "@server/lib/logAccessAudit";
 import { remoteGetASNForIp } from "@server/lib/asn";
 import { APP_VERSION } from "@server/lib/consts";
 import { enforceResourceSessionLength } from "@server/lib/checkOrgAccessPolicy";
@@ -112,6 +121,9 @@ export async function verifyResourceSession(
 
         // Extract HTTP Basic Auth credentials if present
         const clientHeaderAuth = extractBasicAuth(headers);
+
+        const clientUserAgent = headers?.["user-agent"] || headers?.["User-Agent"];
+        const clientIsBrowser = isBrowserUserAgent(clientUserAgent);
 
         const clientIp = requestIp
             ? stripPortFromHost(requestIp, badgerVersion)
@@ -295,9 +307,14 @@ export async function verifyResourceSession(
             return allowed(res);
         }
 
-        const redirectPath = `/auth/resource/${encodeURIComponent(
-            resource.resourceGuid
-        )}?redirect=${encodeURIComponent(originalRequestURL)}`;
+        // Only offer a browser redirect to clients that can actually follow one and log in
+        // (an interactive browser). Non-browser clients (curl, scripts, bots, etc.) just get
+        // an unauthorized response from Badger instead of a login redirect URL.
+        const redirectPath = clientIsBrowser
+            ? `/auth/resource/${encodeURIComponent(
+                  resource.resourceGuid
+              )}?redirect=${encodeURIComponent(originalRequestURL)}`
+            : undefined;
 
         // check for access token in headers
         if (
@@ -318,13 +335,16 @@ export async function verifyResourceSession(
                     config.getRemoteConfig().resource_access_token_headers.token
                 ];
 
-            const { valid, error, tokenItem } = await verifyResourceAccessToken(
-                {
-                    accessToken,
-                    accessTokenId,
-                    resourceId: resource.resourceId
-                }
-            );
+            const {
+                valid,
+                error,
+                tokenItem,
+                userData
+            } = await verifyResourceAccessToken({
+                accessToken,
+                accessTokenId,
+                resourceId: resource.resourceId
+            });
 
             if (error) {
                 logger.debug("Access token invalid: " + error);
@@ -341,22 +361,15 @@ export async function verifyResourceSession(
             }
 
             if (valid && tokenItem) {
-                logRequestAudit(
-                    {
-                        action: true,
-                        reason: 102, // valid access token
-                        resourceId: resource.resourceId,
-                        orgId: resource.orgId,
-                        location: ipCC,
-                        apiKey: {
-                            name: tokenItem.title,
-                            apiKeyId: tokenItem.accessTokenId
-                        }
-                    },
-                    parsedBody.data
+                return await allowAccessToken(
+                    res,
+                    resource,
+                    tokenItem,
+                    sessions,
+                    parsedBody.data,
+                    ipCC,
+                    userData
                 );
-
-                return allowed(res);
             }
         }
 
@@ -369,13 +382,16 @@ export async function verifyResourceSession(
 
             const [accessTokenId, accessToken] = token.split(".");
 
-            const { valid, error, tokenItem } = await verifyResourceAccessToken(
-                {
-                    accessToken,
-                    accessTokenId,
-                    resourceId: resource.resourceId
-                }
-            );
+            const {
+                valid,
+                error,
+                tokenItem,
+                userData
+            } = await verifyResourceAccessToken({
+                accessToken,
+                accessTokenId,
+                resourceId: resource.resourceId
+            });
 
             if (error) {
                 logger.debug("Access token invalid: " + error);
@@ -392,27 +408,20 @@ export async function verifyResourceSession(
             }
 
             if (valid && tokenItem) {
-                logRequestAudit(
-                    {
-                        action: true,
-                        reason: 102, // valid access token
-                        resourceId: resource.resourceId,
-                        orgId: resource.orgId,
-                        location: ipCC,
-                        apiKey: {
-                            name: tokenItem.title,
-                            apiKeyId: tokenItem.accessTokenId
-                        }
-                    },
-                    parsedBody.data
+                return await allowAccessToken(
+                    res,
+                    resource,
+                    tokenItem,
+                    sessions,
+                    parsedBody.data,
+                    ipCC,
+                    userData
                 );
-
-                return allowed(res);
             }
         }
 
         // check for HTTP Basic Auth header
-        const clientHeaderAuthKey = `headerAuth:${clientHeaderAuth}`;
+        const clientHeaderAuthKey = `headerAuth:${resource.resourceId}:${clientHeaderAuth}`;
         if (headerAuth && clientHeaderAuth) {
             if (localCache.get(clientHeaderAuthKey)) {
                 logger.debug(
@@ -657,22 +666,25 @@ export async function verifyResourceSession(
                         "Resource allowed because access token session is valid"
                     );
 
-                    logRequestAudit(
+                    const tokenData = await getResourceAccessToken(
+                        resourceSession.accessTokenId
+                    );
+                    const tokenItem = tokenData?.tokenItem;
+                    const userData = tokenData?.userData;
+
+                    logAccessTokenRequestAudit(
                         {
-                            action: true,
-                            reason: 102, // valid access token
                             resourceId: resource.resourceId,
                             orgId: resource.orgId,
                             location: ipCC,
-                            apiKey: {
-                                name: null,
-                                apiKeyId: resourceSession.accessTokenId
-                            }
+                            accessTokenId: resourceSession.accessTokenId,
+                            tokenTitle: tokenItem?.title ?? null,
+                            userData
                         },
                         parsedBody.data
                     );
 
-                    return allowed(res);
+                    return allowed(res, userData);
                 }
 
                 if (resourceSession.userSessionId && sso) {
@@ -875,6 +887,182 @@ function allowed(res: Response, userData?: BasicUserData) {
         status: HttpCode.OK
     };
     return response<VerifyUserResponse>(res, data);
+}
+
+async function allowAccessToken(
+    res: Response,
+    resource: Resource,
+    tokenItem: ResourceAccessToken,
+    sessions: Record<string, string> | undefined,
+    auditBody: VerifyResourceSessionSchema,
+    location?: string,
+    userData?: AccessTokenUserData
+) {
+    logAccessTokenRequestAudit(
+        {
+            resourceId: resource.resourceId,
+            orgId: resource.orgId,
+            location,
+            accessTokenId: tokenItem.accessTokenId,
+            tokenTitle: tokenItem.title,
+            userData
+        },
+        auditBody
+    );
+
+    if (!tokenItem.persistSession) {
+        logAccessTokenAccessAudit(tokenItem, resource, userData, auditBody);
+        return allowed(res, userData);
+    }
+
+    const resourceSessionToken = extractResourceSessionToken(
+        sessions ?? {},
+        resource.ssl
+    );
+
+    if (resourceSessionToken) {
+        const sessionCacheKey = `session:${resourceSessionToken}`;
+        let resourceSession: ResourceSession | null | undefined =
+            localCache.get(sessionCacheKey);
+
+        if (!resourceSession) {
+            const result = await validateResourceSessionToken(
+                resourceSessionToken,
+                resource.resourceId
+            );
+            resourceSession = result?.resourceSession;
+            localCache.set(sessionCacheKey, resourceSession, 5);
+        }
+
+        if (
+            resourceSession &&
+            !resourceSession.isRequestToken &&
+            resourceSession.accessTokenId === tokenItem.accessTokenId
+        ) {
+            logger.debug(
+                "Resource allowed because existing access token session is valid"
+            );
+            return allowed(res, userData);
+        }
+    }
+
+    logAccessTokenAccessAudit(tokenItem, resource, userData, auditBody);
+    return await createAccessTokenSession(res, resource, tokenItem, userData);
+}
+
+async function createAccessTokenSession(
+    res: Response,
+    resource: Resource,
+    tokenItem: ResourceAccessToken,
+    userData?: BasicUserData
+) {
+    const cookie = await createAccessTokenResourceSession(
+        resource.resourceId,
+        tokenItem.accessTokenId
+    );
+
+    if (cookie) {
+        res.appendHeader("Set-Cookie", cookie);
+        logger.debug("Access token is valid, creating new session");
+    } else {
+        logger.error(
+            "Failed to create access token session via hybrid endpoint"
+        );
+    }
+
+    return allowed(res, userData);
+}
+
+function logAccessTokenRequestAudit(
+    data: {
+        resourceId: number;
+        orgId: string;
+        location?: string;
+        accessTokenId: string;
+        tokenTitle: string | null;
+        userData?: BasicUserData;
+    },
+    body: VerifyResourceSessionSchema
+) {
+    if (data.userData) {
+        logRequestAudit(
+            {
+                action: true,
+                reason: 102, // valid access token
+                resourceId: data.resourceId,
+                orgId: data.orgId,
+                location: data.location,
+                user: {
+                    username: data.userData.username,
+                    userId: data.userData.userId
+                },
+                metadata: {
+                    accessTokenId: data.accessTokenId,
+                    accessTokenTitle: data.tokenTitle
+                }
+            },
+            body
+        );
+        return;
+    }
+
+    logRequestAudit(
+        {
+            action: true,
+            reason: 102, // valid access token
+            resourceId: data.resourceId,
+            orgId: data.orgId,
+            location: data.location,
+            apiKey: {
+                name: data.tokenTitle,
+                apiKeyId: data.accessTokenId
+            }
+        },
+        body
+    );
+}
+
+function logAccessTokenAccessAudit(
+    tokenItem: ResourceAccessToken,
+    resource: Resource,
+    userData: BasicUserData | undefined,
+    body: VerifyResourceSessionSchema
+) {
+    const userAgent =
+        body.headers?.["user-agent"] || body.headers?.["User-Agent"];
+
+    if (userData) {
+        logAccessAudit({
+            orgId: resource.orgId,
+            resourceId: resource.resourceId,
+            action: true,
+            type: "accessToken",
+            user: {
+                username: userData.username,
+                userId: userData.userId
+            },
+            metadata: {
+                accessTokenId: tokenItem.accessTokenId,
+                accessTokenTitle: tokenItem.title
+            },
+            userAgent,
+            requestIp: body.requestIp
+        });
+        return;
+    }
+
+    logAccessAudit({
+        orgId: resource.orgId,
+        resourceId: resource.resourceId,
+        action: true,
+        type: "accessToken",
+        apiKey: {
+            name: tokenItem.title,
+            apiKeyId: tokenItem.accessTokenId
+        },
+        userAgent,
+        requestIp: body.requestIp
+    });
 }
 
 async function headerAuthChallenged(
@@ -1095,13 +1283,44 @@ async function checkRules(
     return;
 }
 
+// Decodes percent-encoding (so an encoded slash like `%2F` is treated as a
+// real path separator, matching what most backends will do) and then
+// resolves `.` / `..` segments, so a request like `/public%2F..%2Fadmin/`
+// or `/public/../admin/` is matched as `/admin/`, not as a literal segment
+// or a wildcard-swallowed sequence under `/public/*`.
+function decodeAndResolvePath(p: string): string[] {
+    const rawParts = p.split("/").filter(Boolean);
+
+    const resolved: string[] = [];
+    for (const rawPart of rawParts) {
+        let part: string;
+        try {
+            part = decodeURIComponent(rawPart);
+        } catch {
+            part = rawPart;
+        }
+
+        // an encoded slash can turn one raw segment into several real ones
+        for (const segment of part.split("/").filter(Boolean)) {
+            if (segment === ".") {
+                continue;
+            } else if (segment === "..") {
+                resolved.pop();
+            } else {
+                resolved.push(segment);
+            }
+        }
+    }
+
+    return resolved;
+}
+
 export function isPathAllowed(pattern: string, path: string): boolean {
     logger.debug(`\nMatching path "${path}" against pattern "${pattern}"`);
 
     // Normalize and split paths into segments
-    const normalize = (p: string) => p.split("/").filter(Boolean);
-    const patternParts = normalize(pattern);
-    const pathParts = normalize(path);
+    const patternParts = pattern.split("/").filter(Boolean);
+    const pathParts = decodeAndResolvePath(path);
 
     logger.debug(`Normalized pattern parts: [${patternParts.join(", ")}]`);
     logger.debug(`Normalized path parts: [${pathParts.join(", ")}]`);
@@ -1372,6 +1591,46 @@ async function getCountryCodeFromIp(ip: string): Promise<string | undefined> {
     }
 
     return cachedCountryCode;
+}
+
+// Permissive by default: only reject known non-browser clients or a missing
+// User-Agent (real browsers always send one). This avoids blocking real
+// browsers whose UA string doesn't match a hardcoded allow-list.
+const NON_BROWSER_USER_AGENT_PATTERNS = [
+    /curl/,
+    /wget/,
+    /python-requests/,
+    /python-urllib/,
+    /go-http-client/,
+    /okhttp/,
+    /axios/,
+    /node-fetch/,
+    /postmanruntime/,
+    /insomnia/,
+    /libwww-perl/,
+    /java\//,
+    /ruby/,
+    /php/,
+    /bot/,
+    /spider/,
+    /crawler/,
+    /headlesschrome/,
+    /phantomjs/,
+    /httpclient/,
+    /prometheus/,
+    /go-resty/,
+    /apache-httpclient/,
+    /scrapy/
+];
+
+function isBrowserUserAgent(userAgent: string | undefined): boolean {
+    if (!userAgent) {
+        return false;
+    }
+
+    const ua = userAgent.toLowerCase();
+
+    return !NON_BROWSER_USER_AGENT_PATTERNS.some((pattern) => pattern.test(ua));
 }
 
 function extractBasicAuth(

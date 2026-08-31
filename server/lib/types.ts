@@ -113,10 +113,21 @@ export type ResourceAccessToken = {
     accessTokenId: string;
     orgId: string;
     resourceId: number;
+    userId: string | null;
+    path: string | null;
     tokenHash: string;
     sessionLength: number;
     expiresAt: number | null;
     title: string | null;
     description: string | null;
+    persistSession: boolean;
     createdAt: number;
+};
+
+export type AccessTokenUserData = {
+    userId: string;
+    username: string;
+    email: string | null;
+    name: string | null;
+    role: string | null;
 };

@@ -135,6 +135,10 @@ export async function logRequestAudit(
         requestIp?: string;
     }
 ) {
+    if (!config.getRawConfig().app.audit_logging_enabled) {
+        return;
+    }
+
     try {
         if (data.orgId) {
             const retentionDays = await getRetentionDays(data.orgId);

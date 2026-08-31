@@ -15,7 +15,8 @@ export const configSchema = z.object({
             log_level: z
                 .enum(["debug", "info", "warn", "error"])
                 .default("info"),
-            log_failed_attempts: z.boolean().optional().default(false)
+            log_failed_attempts: z.boolean().optional().default(false),
+            audit_logging_enabled: z.boolean().optional().default(true)
         })
         .prefault({}),
     server: z
