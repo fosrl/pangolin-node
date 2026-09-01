@@ -1,5 +1,5 @@
 import fs from "fs";
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 import { configFilePath1, configFilePath2 } from "./consts";
 import { z } from "zod";
 
