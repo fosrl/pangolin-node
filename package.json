@@ -16,18 +16,18 @@
         "start": "ENVIRONMENT=prod node --enable-source-maps dist/server.mjs"
     },
     "dependencies": {
-        "@node-rs/argon2": "2.1.0",
-        "axios": "1.19.0",
+        "@node-rs/argon2": "2.2.0",
+        "axios": "1.20.0",
         "cookie-parser": "1.4.7",
         "cors": "2.8.6",
         "drizzle-orm": "0.45.2",
-        "eslint": "10.8.1",
-        "eslint-config-next": "16.3.1",
+        "eslint": "10.9.1",
+        "eslint-config-next": "16.3.3",
         "express": "5.2.1",
-        "express-rate-limit": "8.6.2",
+        "express-rate-limit": "8.7.0",
         "helmet": "8.3.0",
         "http-errors": "2.0.1",
-        "js-yaml": "5.2.3",
+        "js-yaml": "5.4.1",
         "node-cache": "5.1.2",
         "pg": "8.23.0",
         "react": "19.2.8",
@@ -36,7 +36,7 @@
         "winston-daily-rotate-file": "5.0.0",
         "ws": "8.21.3",
         "yargs": "18.1.0",
-        "zod": "4.4.3",
+        "zod": "4.5.4",
         "zod-validation-error": "5.0.0"
     },
     "devDependencies": {
@@ -44,14 +44,14 @@
         "@types/cors": "2.8.19",
         "@types/express": "5.0.6",
         "@types/js-yaml": "4.0.9",
-        "@types/node": "26.2.0",
-        "@types/pg": "8.21.0",
+        "@types/node": "26.4.0",
+        "@types/pg": "8.23.1",
         "@types/semver": "7.8.0",
         "@types/ws": "8.18.1",
         "esbuild": "0.28.2",
         "esbuild-node-externals": "2.0.0",
-        "tsx": "4.23.12",
-        "typescript": "6.0.3",
-        "typescript-eslint": "8.67.0"
+        "tsx": "4.23.13",
+        "typescript": "7.0.2",
+        "typescript-eslint": "8.68.0"
     }
 }
