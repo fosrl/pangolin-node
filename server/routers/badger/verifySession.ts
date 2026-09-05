@@ -116,6 +116,7 @@ export async function verifyResourceSession(
             path,
             headers,
             query,
+            method,
             badgerVersion
         } = parsedBody.data;
 
@@ -239,7 +240,8 @@ export async function verifyResourceSession(
                 clientIp,
                 path,
                 ipCC,
-                ipAsn
+                ipAsn,
+                method
             );
 
             if (action === "ACCEPT") {
@@ -1205,7 +1207,8 @@ async function checkRules(
     clientIp: string | undefined,
     path: string | undefined,
     ipCC?: string,
-    ipAsn?: number
+    ipAsn?: number,
+    method?: string
 ): Promise<"ACCEPT" | "DROP" | "PASS" | undefined> {
     const ruleCacheKey = `rules:${resourceId}`;
 
@@ -1224,63 +1227,144 @@ async function checkRules(
     // sort rules by priority in ascending order
     rules = rules.sort((a, b) => a.priority - b.priority);
 
+    const context: RuleContext = { clientIp, path, ipCC, ipAsn, method };
+
     for (const rule of rules) {
         if (!rule.enabled) {
             continue;
         }
 
-        if (
-            clientIp &&
-            rule.match === "CIDR" &&
-            isIpInCidr(clientIp, rule.value)
-        ) {
-            return rule.action as any;
-        } else if (clientIp && rule.match === "IP" && clientIp === rule.value) {
-            return rule.action as any;
-        } else if (
-            path &&
-            rule.match === "PATH" &&
-            isPathAllowed(rule.value, path)
-        ) {
-            return rule.action as any;
-        } else if (clientIp && (rule.match === "COUNTRY" || rule.match === "COUNTRY_IS_NOT")) {
-            // COUNTRY=ALL should not affect local/private/CGNAT addresses.
-            if (
-                rule.value.toUpperCase() === "ALL" &&
-                isLocalOrCarrierGradeNatIp(clientIp)
-            ) {
-                continue;
-            }
-
-            const inCountry = await isIpInGeoIP(ipCC, rule.value);
-            const matched = rule.match === "COUNTRY" ? inCountry : !inCountry;
-
-            if (matched) {
+        if (rule.match === "AND") {
+            if (await matchesAllConditions(rule, context)) {
                 return rule.action as any;
             }
-        } else if (clientIp && rule.match === "ASN") {
-            // ASN=ALL/AS0 should not affect local/private/CGNAT addresses.
-            if (
-                (rule.value.toUpperCase() === "ALL" ||
-                    rule.value.toUpperCase() === "AS0") &&
-                isLocalOrCarrierGradeNatIp(clientIp)
-            ) {
-                continue;
-            }
-
-            if (await isIpInAsn(ipAsn, rule.value)) {
-                return rule.action as any;
-            }
-        } else if (
-            clientIp &&
-            rule.match === "REGION" &&
-            (await isIpInRegion(ipCC, rule.value))
-        ) {
+        } else if (await matchesCondition(rule.match, rule.value, context)) {
             return rule.action as any;
         }
     }
 
     return;
+}
+
+type RuleContext = {
+    clientIp: string | undefined;
+    path: string | undefined;
+    ipCC?: string;
+    ipAsn?: number;
+    method?: string;
+};
+
+async function matchesCondition(
+    match: string,
+    value: string,
+    { clientIp, path, ipCC, ipAsn, method }: RuleContext
+): Promise<boolean> {
+    if (clientIp && match === "CIDR") {
+        return isIpInCidr(clientIp, value);
+    } else if (clientIp && match === "IP") {
+        return clientIp === value;
+    } else if (path && match === "PATH") {
+        return isPathAllowed(value, path);
+    } else if (clientIp && (match === "COUNTRY" || match === "COUNTRY_IS_NOT")) {
+        // COUNTRY=ALL should not affect local/private/CGNAT addresses.
+        if (
+            value.toUpperCase() === "ALL" &&
+            isLocalOrCarrierGradeNatIp(clientIp)
+        ) {
+            return false;
+        }
+
+        const inCountry = await isIpInGeoIP(ipCC, value);
+        return match === "COUNTRY" ? inCountry : !inCountry;
+    } else if (clientIp && match === "ASN") {
+        // ASN=ALL/AS0 should not affect local/private/CGNAT addresses.
+        if (
+            (value.toUpperCase() === "ALL" || value.toUpperCase() === "AS0") &&
+            isLocalOrCarrierGradeNatIp(clientIp)
+        ) {
+            return false;
+        }
+
+        return await isIpInAsn(ipAsn, value);
+    } else if (clientIp && match === "REGION") {
+        return await isIpInRegion(ipCC, value);
+    } else if (method && match === "METHOD") {
+        // value holds a comma-separated list of methods, e.g. "POST,PUT".
+        const requestMethod = method.toUpperCase();
+        return value
+            .split(",")
+            .some(
+                (ruleMethod) => ruleMethod.trim().toUpperCase() === requestMethod
+            );
+    }
+
+    return false;
+}
+
+// An AND rule keeps its conditions as a JSON array in rule.value and applies
+// only when every one of them matches.
+async function matchesAllConditions(
+    rule: ResourceRule,
+    context: RuleContext
+): Promise<boolean> {
+    const conditions = parseRuleConditions(rule.value);
+
+    // an empty list would match every request, so treat it as a broken rule
+    if (!conditions || conditions.length === 0) {
+        logger.warn(
+            `Skipping rule ${rule.ruleId}: value is not a valid condition list`
+        );
+        return false;
+    }
+
+    for (const { match, value } of conditions) {
+        if (!(await matchesCondition(match, value, context))) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// An AND rule stores its conditions as a JSON array in the rule value, e.g.
+// [{"match":"PATH","value":"/api/*"},{"match":"METHOD","value":"POST,PUT"}].
+// Returns null when the value is not a well-formed condition list.
+function parseRuleConditions(
+    value: string
+): Array<{ match: string; value: string }> | null {
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(value);
+    } catch {
+        return null;
+    }
+
+    if (!Array.isArray(parsed)) {
+        return null;
+    }
+
+    const conditions: Array<{ match: string; value: string }> = [];
+    for (const entry of parsed) {
+        if (typeof entry !== "object" || entry === null) {
+            return null;
+        }
+
+        const { match, value: conditionValue } = entry as Record<
+            string,
+            unknown
+        >;
+        if (
+            typeof match !== "string" ||
+            match === "AND" ||
+            typeof conditionValue !== "string"
+        ) {
+            return null;
+        }
+
+        conditions.push({ match, value: conditionValue });
+    }
+
+    return conditions;
 }
 
 // Decodes percent-encoding (so an encoded slash like `%2F` is treated as a
