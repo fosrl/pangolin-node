@@ -116,6 +116,7 @@ export async function verifyResourceSession(
             path,
             headers,
             query,
+            method,
             badgerVersion
         } = parsedBody.data;
 
@@ -239,7 +240,8 @@ export async function verifyResourceSession(
                 clientIp,
                 path,
                 ipCC,
-                ipAsn
+                ipAsn,
+                method
             );
 
             if (action === "ACCEPT") {
@@ -1205,7 +1207,8 @@ async function checkRules(
     clientIp: string | undefined,
     path: string | undefined,
     ipCC?: string,
-    ipAsn?: number
+    ipAsn?: number,
+    method?: string
 ): Promise<"ACCEPT" | "DROP" | "PASS" | undefined> {
     const ruleCacheKey = `rules:${resourceId}`;
 
@@ -1277,10 +1280,24 @@ async function checkRules(
             (await isIpInRegion(ipCC, rule.value))
         ) {
             return rule.action as any;
+        } else if (
+            method &&
+            rule.match === "METHOD" &&
+            isMethodAllowed(rule.value, method)
+        ) {
+            return rule.action as any;
         }
     }
 
     return;
+}
+
+// rule.value holds a comma-separated list of HTTP methods, e.g. "POST,PUT".
+function isMethodAllowed(ruleValue: string, method: string): boolean {
+    const requestMethod = method.toUpperCase();
+    return ruleValue
+        .split(",")
+        .some((ruleMethod) => ruleMethod.trim().toUpperCase() === requestMethod);
 }
 
 // Decodes percent-encoding (so an encoded slash like `%2F` is treated as a
