@@ -7,13 +7,15 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
 const (
 	FRONTEND_SECRET_KEY = "af4e4785-7e09-11f0-b93a-74563c4e2a7e"
-	// CLOUD_API_URL       = "https://pangolin.fossorial.io/api/v1/remote-exit-node/quick-start"
-	CLOUD_API_URL = "https://app.pangolin.net/api/v1/remote-exit-node/quick-start"
+
+	// DefaultPanelURL is Pangolin Cloud, used unless the --pangolin-endpoint flag points elsewhere.
+	DefaultPanelURL = "https://app.pangolin.net"
 )
 
 // HybridCredentials represents the response from the cloud API
@@ -42,9 +44,10 @@ func generateValidationToken() string {
 	return base64.StdEncoding.EncodeToString(obfuscated)
 }
 
-// requestHybridCredentials makes an HTTP POST request to the cloud API
-// to get hybrid credentials (ID and secret)
-func requestHybridCredentials() (*HybridCredentials, error) {
+// requestHybridCredentials makes an HTTP POST request to the panel API
+// to get hybrid credentials (ID and secret). panelURL is the base URL of
+// the Pangolin panel (Pangolin Cloud by default, or a self-hosted instance).
+func requestHybridCredentials(panelURL string) (*HybridCredentials, error) {
 	// Generate validation token
 	token := generateValidationToken()
 
@@ -60,7 +63,8 @@ func requestHybridCredentials() (*HybridCredentials, error) {
 	}
 
 	// Create HTTP request
-	req, err := http.NewRequest("POST", CLOUD_API_URL, bytes.NewBuffer(jsonData))
+	apiURL := strings.TrimRight(panelURL, "/") + "/api/v1/remote-exit-node/quick-start"
+	req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create HTTP request: %v", err)
 	}

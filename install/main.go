@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"embed"
+	"flag"
 	"fmt"
 	"io"
 	"io/fs"
@@ -50,6 +51,9 @@ const (
 
 func main() {
 
+	panelURL := flag.String("pangolin-endpoint", DefaultPanelURL, "Base URL of the Pangolin server to fetch node credentials from. Only needed if you are not using Pangolin Cloud (app.pangolin.net).")
+	flag.Parse()
+
 	// print a banner about prerequisites - opening port 80, 443, 51820, and 21820 on the VPS and firewall and pointing your domain to the VPS IP with a records. Docs are at http://localhost:3000/Getting%20Started/dns-networking
 
 	fmt.Println("Welcome to the Pangolin Remote Node installer!")
@@ -85,7 +89,7 @@ func main() {
 		// If the secret and id are not generated then generate them
 		if config.HybridId == "" || config.HybridSecret == "" {
 			// fmt.Println("Requesting hybrid credentials from cloud...")
-			credentials, err := requestHybridCredentials()
+			credentials, err := requestHybridCredentials(*panelURL)
 			if err != nil {
 				fmt.Printf("Error requesting hybrid credentials: %v\n", err)
 				fmt.Println("Please obtain credentials manually from the dashboard and run the installer again.")
@@ -96,7 +100,7 @@ func main() {
 			fmt.Printf("Your managed credentials have been obtained successfully.\n")
 			fmt.Printf("	ID:     %s\n", config.HybridId)
 			fmt.Printf("	Secret: %s\n", config.HybridSecret)
-			fmt.Print("\nTake these to the Pangolin dashboard https://app.pangolin.net to adopt your node.\n\n")
+			fmt.Printf("\nTake these to the Pangolin dashboard %s to adopt your node.\n\n", *panelURL)
 			readBool(reader, "Have you adopted your node?", true)
 		}
 
