@@ -20,7 +20,7 @@ import logger from "@server/logger";
 import HttpCode from "@server/types/HttpCode";
 import { NextFunction, Request, Response } from "express";
 import createHttpError from "http-errors";
-import NodeCache from "node-cache";
+import { createLocalCache } from "@server/lib/createLocalCache";
 import { z } from "zod";
 import { fromError } from "zod-validation-error";
 import { remoteGetCountryCodeForIp } from "@server/lib/geoip";
@@ -50,10 +50,7 @@ import { REGIONS } from "@server/db/regions";
 
 const APP_VERSION_PREPEND = `remote-${APP_VERSION}`;
 
-// We'll see if this speeds anything up
-const localCache = new NodeCache({
-    stdTTL: 5 // seconds
-});
+const localCache = createLocalCache();
 
 const verifyResourceSessionSchema = z.object({
     sessions: z.record(z.string(), z.string()).optional(),
@@ -548,7 +545,9 @@ export async function verifyResourceSession(
                 );
 
                 resourceSession = result?.resourceSession;
-                localCache.set(sessionCacheKey, resourceSession, 5);
+                if (resourceSession) {
+                    localCache.set(sessionCacheKey, resourceSession, 5);
+                }
             }
 
             if (resourceSession?.isRequestToken) {
@@ -931,7 +930,9 @@ async function allowAccessToken(
                 resource.resourceId
             );
             resourceSession = result?.resourceSession;
-            localCache.set(sessionCacheKey, resourceSession, 5);
+            if (resourceSession) {
+                localCache.set(sessionCacheKey, resourceSession, 5);
+            }
         }
 
         if (
