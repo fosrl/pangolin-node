@@ -22,6 +22,9 @@ export type Resource = {
     enableProxy: boolean | null;
     skipToIdpId: number | null;
     headers: string | null;
+    // Optional so payloads from older managed versions still parse
+    mode?: "rdp" | "ssh" | "http" | "vnc" | "inference" | "tcp" | "udp";
+    forwardIdentityHeaders?: boolean;
 };
 
 export type ResourcePincode = {

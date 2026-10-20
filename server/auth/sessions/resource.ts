@@ -78,4 +78,6 @@ export async function createAccessTokenResourceSession(
 
 export type ResourceSessionValidationResult = {
     resourceSession: ResourceSession | null;
+    // Email of the whitelist entry the session was issued for, if any
+    whitelistEmail?: string | null;
 };
