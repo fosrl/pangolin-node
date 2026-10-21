@@ -48,7 +48,6 @@ export const configSchema = z.object({
                 .optional()
                 .default("/var/dynamic/router_config.yml")
         })
-        .optional()
         .prefault({}),
     gerbil: z.object({
         base_endpoint: z.string(),

@@ -1,17 +1,18 @@
 name: ESLint
 
-on:
-    pull_request:
-        paths:
-            - '**/*.js'
-            - '**/*.jsx'
-            - '**/*.ts'
-            - '**/*.tsx'
-            - '.eslintrc*'
-            - 'package.json'
-            - 'yarn.lock'
-            - 'pnpm-lock.yaml'
-            - 'package-lock.json'
+# disable until eslint is updated
+# on:
+#     pull_request:
+#         paths:
+#             - '**/*.js'
+#             - '**/*.jsx'
+#             - '**/*.ts'
+#             - '**/*.tsx'
+#             - '.eslintrc*'
+#             - 'package.json'
+#             - 'yarn.lock'
+#             - 'pnpm-lock.yaml'
+#             - 'package-lock.json'
 
 jobs:
     Linter:

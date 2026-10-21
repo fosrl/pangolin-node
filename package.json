@@ -27,10 +27,9 @@
         "express-rate-limit": "8.7.1",
         "helmet": "8.3.0",
         "http-errors": "2.0.1",
+        "lru-cache": "11.5.2",
         "js-yaml": "5.4.3",
-        "node-cache": "5.1.2",
         "pg": "8.23.1",
-        "react": "19.3.0",
         "semver": "7.8.5",
         "winston": "3.19.0",
         "winston-daily-rotate-file": "5.0.0",
@@ -51,7 +50,6 @@
         "esbuild": "0.28.2",
         "esbuild-node-externals": "2.0.0",
         "tsx": "4.23.15",
-        "typescript": "7.0.2",
-        "typescript-eslint": "8.71.1"
+        "typescript": "7.0.2"
     }
 }

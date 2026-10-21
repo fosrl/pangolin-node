@@ -30,6 +30,18 @@ export type UserSessionWithUser = {
     user: any;
 };
 
+export type RedirectByHost = {
+    redirectId: number;
+    orgId: string;
+    matchPath: string | null;
+    pathMatchType: string;
+    destinationHost: string;
+    rewritePath: string | null;
+    rewritePathType: string | null;
+    permanent: boolean;
+    priority: number | null;
+};
+
 /**
  * Get resource by domain with pincode and password information
  */
@@ -56,6 +68,36 @@ export async function getResourceByDomain(
             logger.error("Error fetching config in verify session:", error);
         }
         return null;
+    }
+}
+
+/**
+ * Enabled redirects listening on the given host, highest priority first.
+ * Host matching (including wildcard labels) happens on the central server.
+ */
+export async function getRedirectsByHost(
+    host: string
+): Promise<RedirectByHost[]> {
+    try {
+        const response = await axios.get(
+            `${config.getRawConfig().managed?.endpoint}/api/v1/hybrid/redirects/host/${encodeURIComponent(host)}`,
+            await tokenManager.getAuthHeader()
+        );
+        return response.data.data ?? [];
+    } catch (error) {
+        if (axios.isAxiosError(error)) {
+            logger.error("Error fetching redirects in verify session:", {
+                message: error.message,
+                code: error.code,
+                status: error.response?.status,
+                statusText: error.response?.statusText,
+                url: error.config?.url,
+                method: error.config?.method
+            });
+        } else {
+            logger.error("Error fetching redirects in verify session:", error);
+        }
+        return [];
     }
 }
 

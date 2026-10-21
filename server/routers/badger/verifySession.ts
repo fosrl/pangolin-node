@@ -3,6 +3,8 @@ import {
     createAccessTokenResourceSession
 } from "@server/auth/sessions/resource";
 import {
+    type RedirectByHost,
+    getRedirectsByHost,
     getResourceByDomain,
     getResourceRules,
     getRoleName,
@@ -13,6 +15,8 @@ import {
     getUserSessionWithUser,
     checkOrgAccessPolicy
 } from "@server/routers/ws/verifySessionQueries";
+import { matchesPath } from "@server/lib/traefik/rule";
+import { rewriteRequestPath } from "@server/lib/traefik/middleware";
 import config from "@server/lib/config";
 import { isIpInCidr, stripPortFromHost } from "@server/lib/ip";
 import { response } from "@server/lib/response";
@@ -20,7 +24,7 @@ import logger from "@server/logger";
 import HttpCode from "@server/types/HttpCode";
 import { NextFunction, Request, Response } from "express";
 import createHttpError from "http-errors";
-import NodeCache from "node-cache";
+import { createLocalCache } from "@server/lib/createLocalCache";
 import { z } from "zod";
 import { fromError } from "zod-validation-error";
 import { remoteGetCountryCodeForIp } from "@server/lib/geoip";
@@ -47,13 +51,11 @@ import { remoteGetASNForIp } from "@server/lib/asn";
 import { APP_VERSION } from "@server/lib/consts";
 import { enforceResourceSessionLength } from "@server/lib/checkOrgAccessPolicy";
 import { REGIONS } from "@server/db/regions";
+import { isPathAllowed } from "@server/lib/pathMatch";
 
 const APP_VERSION_PREPEND = `remote-${APP_VERSION}`;
 
-// We'll see if this speeds anything up
-const localCache = new NodeCache({
-    stdTTL: 5 // seconds
-});
+const localCache = createLocalCache();
 
 const verifyResourceSessionSchema = z.object({
     sessions: z.record(z.string(), z.string()).optional(),
@@ -74,6 +76,7 @@ export type VerifyResourceSessionSchema = z.infer<
 >;
 
 type BasicUserData = {
+    dontStripSession?: boolean;
     userId: string;
     username: string;
     email: string | null;
@@ -81,12 +84,23 @@ type BasicUserData = {
     role: string | null;
 };
 
+// Some auth methods (e.g. email whitelist) only know the remote email and
+// have no associated user record to attach userId/username/name/role to.
+type EmailOnlyUserData = {
+    dontStripSession?: boolean;
+    email: string;
+};
+
 export type VerifyUserResponse = {
     valid: boolean;
     headerAuthChallenged?: boolean;
     redirectUrl?: string;
+    // Set alongside redirectUrl when the redirect is a configured Redirect
+    // rather than a login bounce, so badger can answer 307 instead of 302.
+    redirectPermanent?: boolean;
     userData?: BasicUserData;
     pangolinVersion?: string;
+    dontStripSession?: boolean;
 };
 
 export async function verifyResourceSession(
@@ -116,13 +130,14 @@ export async function verifyResourceSession(
             path,
             headers,
             query,
+            method,
             badgerVersion
         } = parsedBody.data;
 
         // Extract HTTP Basic Auth credentials if present
         const clientHeaderAuth = extractBasicAuth(headers);
 
-        const clientUserAgent = headers?.["user-agent"] || headers?.["User-Agent"];
+        const clientUserAgent = getClientHeader(headers, "user-agent");
         const clientIsBrowser = isBrowserUserAgent(clientUserAgent);
 
         const clientIp = requestIp
@@ -142,6 +157,30 @@ export async function verifyResourceSession(
         if (cleanHost.match(/:[0-9]{1,5}$/)) {
             const matched = "" + cleanHost.match(/:[0-9]{1,5}$/);
             cleanHost = cleanHost.slice(0, -1 * matched.length);
+        }
+
+        // Redirects always win: they are routed ahead of resources in
+        // Traefik and never require auth, even when attached to a resource,
+        // so let a matching one through to the redirect middleware before
+        // any resource lookup.
+        const redirect = await findRedirect(cleanHost, path);
+        if (redirect) {
+            const redirectUrl = buildRedirectUrl(redirect, parsedBody.data);
+            logger.debug(
+                `Redirecting ${cleanHost}${path} to ${redirectUrl} (redirect ${redirect.redirectId})`
+            );
+
+            logRequestAudit(
+                {
+                    action: true,
+                    reason: 110, // redirected
+                    orgId: redirect.orgId,
+                    location: ipCC
+                },
+                parsedBody.data
+            );
+
+            return redirected(res, redirectUrl, redirect.permanent);
         }
 
         const resourceCacheKey = `resource:${cleanHost}`;
@@ -213,7 +252,10 @@ export async function verifyResourceSession(
             return notAllowed(res);
         }
 
-        const { blockAccess } = resource;
+        const { blockAccess, mode } = resource;
+        const dontStripSession = ["ssh", "rdp", "vnc", "inference"].includes(
+            mode ?? ""
+        );
 
         if (blockAccess) {
             logger.debug("Resource blocked", host);
@@ -239,7 +281,8 @@ export async function verifyResourceSession(
                 clientIp,
                 path,
                 ipCC,
-                ipAsn
+                ipAsn,
+                method
             );
 
             if (action === "ACCEPT") {
@@ -256,7 +299,7 @@ export async function verifyResourceSession(
                     parsedBody.data
                 );
 
-                return allowed(res);
+                return allowed(res, undefined, dontStripSession);
             } else if (action === "DROP") {
                 logger.debug("Resource denied by rule");
 
@@ -304,7 +347,7 @@ export async function verifyResourceSession(
                 parsedBody.data
             );
 
-            return allowed(res);
+            return allowed(res, undefined, dontStripSession);
         }
 
         // Only offer a browser redirect to clients that can actually follow one and log in
@@ -366,6 +409,7 @@ export async function verifyResourceSession(
                     resource,
                     tokenItem,
                     sessions,
+                    dontStripSession,
                     parsedBody.data,
                     ipCC,
                     userData
@@ -413,6 +457,7 @@ export async function verifyResourceSession(
                     resource,
                     tokenItem,
                     sessions,
+                    dontStripSession,
                     parsedBody.data,
                     ipCC,
                     userData
@@ -439,7 +484,7 @@ export async function verifyResourceSession(
                     parsedBody.data
                 );
 
-                return allowed(res);
+                return allowed(res, undefined, dontStripSession);
             } else if (
                 await verifyPassword(
                     clientHeaderAuth,
@@ -460,7 +505,7 @@ export async function verifyResourceSession(
                     parsedBody.data
                 );
 
-                return allowed(res);
+                return allowed(res, undefined, dontStripSession);
             }
 
             if (
@@ -548,7 +593,16 @@ export async function verifyResourceSession(
                 );
 
                 resourceSession = result?.resourceSession;
-                localCache.set(sessionCacheKey, resourceSession, 5);
+                if (resourceSession) {
+                    localCache.set(sessionCacheKey, resourceSession, 5);
+                    // Outlives the session entry so a cached session always
+                    // finds its email
+                    localCache.set(
+                        `whitelistEmail:${resourceSession.whitelistId}:${resourceSession.policyWhitelistId}`,
+                        result.whitelistEmail ?? null,
+                        12
+                    );
+                }
             }
 
             if (resourceSession?.isRequestToken) {
@@ -612,7 +666,7 @@ export async function verifyResourceSession(
                         parsedBody.data
                     );
 
-                    return allowed(res);
+                    return allowed(res, undefined, dontStripSession);
                 }
 
                 if (
@@ -635,7 +689,7 @@ export async function verifyResourceSession(
                         parsedBody.data
                     );
 
-                    return allowed(res);
+                    return allowed(res, undefined, dontStripSession);
                 }
 
                 if (
@@ -646,6 +700,11 @@ export async function verifyResourceSession(
                     logger.debug(
                         "Resource allowed because whitelist session is valid"
                     );
+
+                    const whitelistEmail: string | null | undefined =
+                        localCache.get(
+                            `whitelistEmail:${resourceSession.whitelistId}:${resourceSession.policyWhitelistId}`
+                        );
 
                     logRequestAudit(
                         {
@@ -658,33 +717,53 @@ export async function verifyResourceSession(
                         parsedBody.data
                     );
 
-                    return allowed(res);
+                    return allowed(
+                        res,
+                        forwardedUserData(
+                            resource,
+                            whitelistEmail ? { email: whitelistEmail } : undefined
+                        ),
+                        dontStripSession
+                    );
                 }
 
                 if (resourceSession.accessTokenId) {
-                    logger.debug(
-                        "Resource allowed because access token session is valid"
-                    );
-
                     const tokenData = await getResourceAccessToken(
                         resourceSession.accessTokenId
                     );
                     const tokenItem = tokenData?.tokenItem;
                     const userData = tokenData?.userData;
 
-                    logAccessTokenRequestAudit(
-                        {
-                            resourceId: resource.resourceId,
-                            orgId: resource.orgId,
-                            location: ipCC,
-                            accessTokenId: resourceSession.accessTokenId,
-                            tokenTitle: tokenItem?.title ?? null,
-                            userData
-                        },
-                        parsedBody.data
-                    );
+                    if (
+                        tokenItem &&
+                        tokenItem.resourceId === resource.resourceId
+                    ) {
+                        logger.debug(
+                            "Resource allowed because access token session is valid"
+                        );
 
-                    return allowed(res, userData);
+                        logAccessTokenRequestAudit(
+                            {
+                                resourceId: resource.resourceId,
+                                orgId: resource.orgId,
+                                location: ipCC,
+                                accessTokenId: resourceSession.accessTokenId,
+                                tokenTitle: tokenItem.title ?? null,
+                                userData
+                            },
+                            parsedBody.data
+                        );
+
+                        return allowed(
+                            res,
+                            forwardedUserData(resource, userData),
+                            dontStripSession
+                        );
+                    }
+
+                    logger.debug(
+                        "Access token session does not belong to this resource"
+                    );
                 }
 
                 if (resourceSession.userSessionId && sso) {
@@ -702,7 +781,8 @@ export async function verifyResourceSession(
                             resourceData.org
                         );
 
-                        localCache.set(userAccessCacheKey, allowedUserData, 5);
+                        // this is query intensive so let it cache a little longer
+                        localCache.set(userAccessCacheKey, allowedUserData, 12);
                     }
 
                     if (
@@ -728,17 +808,27 @@ export async function verifyResourceSession(
                             parsedBody.data
                         );
 
-                        return allowed(res, allowedUserData);
+                        return allowed(
+                            res,
+                            forwardedUserData(resource, {
+                                ...allowedUserData,
+                                dontStripSession
+                            }),
+                            dontStripSession
+                        );
                     }
                 }
             }
         }
 
-        // If headerAuthExtendedCompatibility is activated but no clientHeaderAuth provided, force client to challenge
+        // If headerAuthExtendedCompatibility is activated but no clientHeaderAuth provided, force client to challenge.
+        // Skip the challenge when SSO is also enabled so browsers get the SSO redirect instead of a native Basic
+        // Auth dialog; clients that proactively send Authorization: Basic are still accepted above.
         if (
             headerAuthExtendedCompatibility &&
             headerAuthExtendedCompatibility.extendedCompatibilityIsActivated &&
-            !clientHeaderAuth
+            !clientHeaderAuth &&
+            !sso
         ) {
             return headerAuthChallenged(res, redirectPath, resource.orgId);
         }
@@ -821,6 +911,71 @@ function extractResourceSessionToken(
     return latest.token;
 }
 
+async function findRedirect(
+    host: string,
+    path: string
+): Promise<RedirectByHost | null> {
+    const cacheKey = `redirects:${host}`;
+    let candidates: RedirectByHost[] | undefined = localCache.get(cacheKey);
+    if (!candidates) {
+        candidates = await getRedirectsByHost(host);
+        localCache.set(cacheKey, candidates, 5);
+    }
+
+    // Candidates come back highest priority first, matching the order
+    // Traefik evaluates the routers in.
+    return (
+        candidates.find((r) =>
+            matchesPath(path, r.matchPath, r.pathMatchType)
+        ) ?? null
+    );
+}
+
+/**
+ * Destination for a configured redirect: the scheme and host come from the
+ * redirect's destination, the request's query is kept and the path is run
+ * through the redirect's rewrite rules (if any).
+ */
+function buildRedirectUrl(
+    redirect: RedirectByHost,
+    request: VerifyResourceSessionSchema
+): string {
+    const newPath = rewriteRequestPath(
+        request.path,
+        redirect.matchPath,
+        redirect.pathMatchType,
+        redirect.rewritePath,
+        redirect.rewritePathType
+    );
+
+    let search = "";
+    try {
+        search = new URL(request.originalRequestURL).search;
+    } catch {
+        // originalRequestURL is validated as a URL, so this is only defensive
+    }
+
+    return `${redirect.destinationHost}${newPath}${search}`;
+}
+
+// Like a notAllowed login bounce, but the destination is the configured
+// redirect target rather than the auth page.
+function redirected(res: Response, redirectUrl: string, permanent: boolean) {
+    const data = {
+        data: {
+            valid: true,
+            redirectUrl,
+            redirectPermanent: permanent,
+            pangolinVersion: APP_VERSION_PREPEND
+        },
+        success: true,
+        error: false,
+        message: "Redirected",
+        status: HttpCode.OK
+    };
+    return response<VerifyUserResponse>(res, data);
+}
+
 export type LoginPage = {
     loginPageId: number;
     subdomain: string | null;
@@ -871,16 +1026,35 @@ async function notAllowed(
     return response<VerifyUserResponse>(res, data);
 }
 
-function allowed(res: Response, userData?: BasicUserData) {
+// Badger only sets the Remote-* identity headers for fields present in the
+// response, so omitting the user data is enough to keep them off the upstream
+// request. Some backends (e.g. embedded device web servers) reject requests
+// carrying headers they don't recognize.
+function forwardedUserData<T>(
+    resource: Resource,
+    userData: T | undefined
+): T | undefined {
+    // Treat a missing value (older managed versions) as enabled
+    return resource.forwardIdentityHeaders === false ? undefined : userData;
+}
+
+function allowed(
+    res: Response,
+    userData?: BasicUserData | EmailOnlyUserData,
+    dontStripSession?: boolean
+) {
+    const baseData =
+        userData !== undefined && userData !== null
+            ? {
+                  valid: true,
+                  ...userData,
+                  pangolinVersion: APP_VERSION_PREPEND
+              }
+            : { valid: true, pangolinVersion: APP_VERSION_PREPEND };
     const data = {
-        data:
-            userData !== undefined && userData !== null
-                ? {
-                      valid: true,
-                      ...userData,
-                      pangolinVersion: APP_VERSION_PREPEND
-                  }
-                : { valid: true, pangolinVersion: APP_VERSION_PREPEND },
+        data: dontStripSession
+            ? { ...baseData, dontStripSession: true }
+            : baseData,
         success: true,
         error: false,
         message: "Access allowed",
@@ -894,6 +1068,7 @@ async function allowAccessToken(
     resource: Resource,
     tokenItem: ResourceAccessToken,
     sessions: Record<string, string> | undefined,
+    dontStripSession: boolean | undefined,
     auditBody: VerifyResourceSessionSchema,
     location?: string,
     userData?: AccessTokenUserData
@@ -912,7 +1087,11 @@ async function allowAccessToken(
 
     if (!tokenItem.persistSession) {
         logAccessTokenAccessAudit(tokenItem, resource, userData, auditBody);
-        return allowed(res, userData);
+        return allowed(
+            res,
+            forwardedUserData(resource, userData),
+            dontStripSession
+        );
     }
 
     const resourceSessionToken = extractResourceSessionToken(
@@ -931,7 +1110,9 @@ async function allowAccessToken(
                 resource.resourceId
             );
             resourceSession = result?.resourceSession;
-            localCache.set(sessionCacheKey, resourceSession, 5);
+            if (resourceSession) {
+                localCache.set(sessionCacheKey, resourceSession, 5);
+            }
         }
 
         if (
@@ -942,7 +1123,11 @@ async function allowAccessToken(
             logger.debug(
                 "Resource allowed because existing access token session is valid"
             );
-            return allowed(res, userData);
+            return allowed(
+                res,
+                forwardedUserData(resource, userData),
+                dontStripSession
+            );
         }
     }
 
@@ -970,7 +1155,7 @@ async function createAccessTokenSession(
         );
     }
 
-    return allowed(res, userData);
+    return allowed(res, forwardedUserData(resource, userData));
 }
 
 function logAccessTokenRequestAudit(
@@ -1205,7 +1390,8 @@ async function checkRules(
     clientIp: string | undefined,
     path: string | undefined,
     ipCC?: string,
-    ipAsn?: number
+    ipAsn?: number,
+    method?: string
 ): Promise<"ACCEPT" | "DROP" | "PASS" | undefined> {
     const ruleCacheKey = `rules:${resourceId}`;
 
@@ -1277,180 +1463,27 @@ async function checkRules(
             (await isIpInRegion(ipCC, rule.value))
         ) {
             return rule.action as any;
+        } else if (
+            method &&
+            rule.match === "METHOD" &&
+            isMethodAllowed(rule.value, method)
+        ) {
+            return rule.action as any;
         }
     }
 
     return;
 }
 
-// Decodes percent-encoding (so an encoded slash like `%2F` is treated as a
-// real path separator, matching what most backends will do) and then
-// resolves `.` / `..` segments, so a request like `/public%2F..%2Fadmin/`
-// or `/public/../admin/` is matched as `/admin/`, not as a literal segment
-// or a wildcard-swallowed sequence under `/public/*`.
-function decodeAndResolvePath(p: string): string[] {
-    const rawParts = p.split("/").filter(Boolean);
-
-    const resolved: string[] = [];
-    for (const rawPart of rawParts) {
-        let part: string;
-        try {
-            part = decodeURIComponent(rawPart);
-        } catch {
-            part = rawPart;
-        }
-
-        // an encoded slash can turn one raw segment into several real ones
-        for (const segment of part.split("/").filter(Boolean)) {
-            if (segment === ".") {
-                continue;
-            } else if (segment === "..") {
-                resolved.pop();
-            } else {
-                resolved.push(segment);
-            }
-        }
-    }
-
-    return resolved;
+// rule.value holds a comma-separated list of HTTP methods, e.g. "POST,PUT".
+function isMethodAllowed(ruleValue: string, method: string): boolean {
+    const requestMethod = method.toUpperCase();
+    return ruleValue
+        .split(",")
+        .some((ruleMethod) => ruleMethod.trim().toUpperCase() === requestMethod);
 }
 
-export function isPathAllowed(pattern: string, path: string): boolean {
-    logger.debug(`\nMatching path "${path}" against pattern "${pattern}"`);
-
-    // Normalize and split paths into segments
-    const patternParts = pattern.split("/").filter(Boolean);
-    const pathParts = decodeAndResolvePath(path);
-
-    logger.debug(`Normalized pattern parts: [${patternParts.join(", ")}]`);
-    logger.debug(`Normalized path parts: [${pathParts.join(", ")}]`);
-
-    // Maximum recursion depth to prevent stack overflow and memory issues
-    const MAX_RECURSION_DEPTH = 100;
-
-    // Recursive function to try different wildcard matches
-    function matchSegments(
-        patternIndex: number,
-        pathIndex: number,
-        depth: number = 0
-    ): boolean {
-        // Check recursion depth limit
-        if (depth > MAX_RECURSION_DEPTH) {
-            logger.warn(
-                `Path matching exceeded maximum recursion depth (${MAX_RECURSION_DEPTH}) for pattern "${pattern}" and path "${path}"`
-            );
-            return false;
-        }
-
-        const indent = "  ".repeat(depth); // Indent based on recursion depth
-        const currentPatternPart = patternParts[patternIndex];
-        const currentPathPart = pathParts[pathIndex];
-
-        logger.debug(
-            `${indent}Checking patternIndex=${patternIndex} (${currentPatternPart || "END"}) vs pathIndex=${pathIndex} (${currentPathPart || "END"}) [depth=${depth}]`
-        );
-
-        // If we've consumed all pattern parts, we should have consumed all path parts
-        if (patternIndex >= patternParts.length) {
-            const result = pathIndex >= pathParts.length;
-            logger.debug(
-                `${indent}Reached end of pattern, remaining path: ${pathParts.slice(pathIndex).join("/")} -> ${result}`
-            );
-            return result;
-        }
-
-        // If we've consumed all path parts but still have pattern parts
-        if (pathIndex >= pathParts.length) {
-            // The only way this can match is if all remaining pattern parts are wildcards
-            const remainingPattern = patternParts.slice(patternIndex);
-            const result = remainingPattern.every((p) => p === "*");
-            logger.debug(
-                `${indent}Reached end of path, remaining pattern: ${remainingPattern.join("/")} -> ${result}`
-            );
-            return result;
-        }
-
-        // For full segment wildcards, try consuming different numbers of path segments
-        if (currentPatternPart === "*") {
-            logger.debug(
-                `${indent}Found wildcard at pattern index ${patternIndex}`
-            );
-
-            // Try consuming 0 segments (skip the wildcard)
-            logger.debug(
-                `${indent}Trying to skip wildcard (consume 0 segments)`
-            );
-            if (matchSegments(patternIndex + 1, pathIndex, depth + 1)) {
-                logger.debug(
-                    `${indent}Successfully matched by skipping wildcard`
-                );
-                return true;
-            }
-
-            // Try consuming current segment and recursively try rest
-            logger.debug(
-                `${indent}Trying to consume segment "${currentPathPart}" for wildcard`
-            );
-            if (matchSegments(patternIndex, pathIndex + 1, depth + 1)) {
-                logger.debug(
-                    `${indent}Successfully matched by consuming segment for wildcard`
-                );
-                return true;
-            }
-
-            logger.debug(`${indent}Failed to match wildcard`);
-            return false;
-        }
-
-        // Check for in-segment wildcard (e.g., "prefix*" or "prefix*suffix")
-        if (currentPatternPart.includes("*")) {
-            logger.debug(
-                `${indent}Found in-segment wildcard in "${currentPatternPart}"`
-            );
-
-            // Convert the pattern segment to a regex pattern
-            const regexPattern = currentPatternPart
-                .replace(/\*/g, ".*") // Replace * with .* for regex wildcard
-                .replace(/\?/g, "."); // Replace ? with . for single character wildcard if needed
-
-            const regex = new RegExp(`^${regexPattern}$`);
-
-            if (regex.test(currentPathPart)) {
-                logger.debug(
-                    `${indent}Segment with wildcard matches: "${currentPatternPart}" matches "${currentPathPart}"`
-                );
-                return matchSegments(
-                    patternIndex + 1,
-                    pathIndex + 1,
-                    depth + 1
-                );
-            }
-
-            logger.debug(
-                `${indent}Segment with wildcard mismatch: "${currentPatternPart}" doesn't match "${currentPathPart}"`
-            );
-            return false;
-        }
-
-        // For regular segments, they must match exactly
-        if (currentPatternPart !== currentPathPart) {
-            logger.debug(
-                `${indent}Segment mismatch: "${currentPatternPart}" != "${currentPathPart}"`
-            );
-            return false;
-        }
-
-        logger.debug(
-            `${indent}Segments match: "${currentPatternPart}" = "${currentPathPart}"`
-        );
-        // Move to next segments in both pattern and path
-        return matchSegments(patternIndex + 1, pathIndex + 1, depth + 1);
-    }
-
-    const result = matchSegments(0, 0, 0);
-    logger.debug(`Final result: ${result}`);
-    return result;
-}
+export { isPathAllowed };
 
 async function isIpInGeoIP(
     ipCountryCode: string | undefined,
@@ -1601,14 +1634,29 @@ const NON_BROWSER_USER_AGENT_PATTERNS = [
     /wget/,
     /python-requests/,
     /python-urllib/,
+    /python-httpx/,
+    /httpx/,
+    /httpcore/,
+    /aiohttp/,
+    /urllib3/,
+    /openai\//,
+    /anthropic/,
     /go-http-client/,
     /okhttp/,
     /axios/,
     /node-fetch/,
+    /undici/,
     /postmanruntime/,
     /insomnia/,
     /libwww-perl/,
     /java\//,
+    /\bjava\b/,
+    /jakarta/,
+    /jersey/,
+    /netty/,
+    /jetty/,
+    /eclipse/,
+    /dbeaver/,
     /ruby/,
     /php/,
     /bot/,
@@ -1631,6 +1679,22 @@ function isBrowserUserAgent(userAgent: string | undefined): boolean {
     const ua = userAgent.toLowerCase();
 
     return !NON_BROWSER_USER_AGENT_PATTERNS.some((pattern) => pattern.test(ua));
+}
+
+function getClientHeader(
+    headers: Record<string, string> | undefined,
+    name: string
+): string | undefined {
+    if (!headers) {
+        return undefined;
+    }
+    const lower = name.toLowerCase();
+    for (const [key, value] of Object.entries(headers)) {
+        if (key.toLowerCase() === lower) {
+            return value;
+        }
+    }
+    return undefined;
 }
 
 function extractBasicAuth(

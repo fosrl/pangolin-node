@@ -1,5 +1,6 @@
 import * as fs from "fs";
 import * as path from "path";
+import { createHash } from "crypto";
 import config from "@server/lib/config";
 import logger from "@server/logger";
 import * as yaml from "js-yaml";
@@ -8,6 +9,10 @@ import { tokenManager } from "../tokenManager";
 import { getValidCertificatesForDomainsHybrid } from "@server/lib/certificates";
 import { sendToExitNode } from "@server/lib/exitNodes";
 
+// Flat files in the certificates dir; the per-domain directory scan and
+// cleanup only look at directories, so these don't collide with them.
+const MTLS_CA_FILE_PREFIX = "mtls-ca-";
+
 export class TraefikConfigManager {
     private intervalId: NodeJS.Timeout | null = null;
     private isRunning = false;
@@ -15,6 +20,7 @@ export class TraefikConfigManager {
     private timeoutId: NodeJS.Timeout | null = null;
     private lastCertificateFetch: Date | null = null;
     private lastKnownDomains = new Set<string>();
+    private pendingDeletion = new Map<string, number>(); // domain -> cycles remaining before delete
     private lastLocalCertificateState = new Map<
         string,
         {
@@ -288,7 +294,7 @@ export class TraefikConfigManager {
                         localState.expiresAt - nowInSeconds;
                     const daysUntilExpiry =
                         secondsUntilExpiry / (60 * 60 * 24);
-                    if (daysUntilExpiry < 45) {
+                    if (daysUntilExpiry < 15) {
                         logger.info(
                             `Fetching certificates due to upcoming expiry for ${domain} (${Math.round(daysUntilExpiry)} days remaining)`
                         );
@@ -312,7 +318,7 @@ export class TraefikConfigManager {
                         state.expiresAt - nowInSeconds;
                     const daysUntilExpiry =
                         secondsUntilExpiry / (60 * 60 * 24);
-                    if (daysUntilExpiry < 45) {
+                    if (daysUntilExpiry < 15) {
                         logger.info(
                             `Fetching certificates due to upcoming expiry for wildcard cert ${certDomain} (${Math.round(daysUntilExpiry)} days remaining)`
                         );
@@ -472,8 +478,18 @@ export class TraefikConfigManager {
             // wait 1 second for traefik to pick up the new certificates
             await new Promise((resolve) => setTimeout(resolve, 500));
 
+            // Swap inline mTLS CA PEMs for files in the certificates dir
+            const mtlsCaFiles = this.writeMtlsCaFiles(traefikConfig);
+
             // Write traefik config as YAML to a second dynamic config file if changed
-            await this.writeTraefikDynamicConfig(traefikConfig);
+            const dynamicConfigWritten =
+                await this.writeTraefikDynamicConfig(traefikConfig);
+
+            // Only remove stale CA files once the config on disk no longer
+            // references them
+            if (dynamicConfigWritten) {
+                this.cleanupUnusedMtlsCaFiles(mtlsCaFiles);
+            }
 
             // Send domains to SNI proxy
             await sendToExitNode({
@@ -620,7 +636,9 @@ export class TraefikConfigManager {
     /**
      * Write traefik config as YAML to a second dynamic config file if changed
      */
-    private async writeTraefikDynamicConfig(traefikConfig: any): Promise<void> {
+    private async writeTraefikDynamicConfig(
+        traefikConfig: any
+    ): Promise<boolean> {
         const traefikDynamicConfigPath =
             config.getRawConfig().traefik.dynamic_router_config_path;
         let shouldWrite = false;
@@ -644,17 +662,110 @@ export class TraefikConfigManager {
         }
         if (shouldWrite) {
             try {
-                fs.writeFileSync(
+                this.atomicWriteFileSync(
                     traefikDynamicConfigPath,
-                    yaml.dump(traefikConfig, { noRefs: true }),
-                    "utf8"
+                    yaml.dump(traefikConfig, { noRefs: true })
                 );
                 logger.info("Traefik dynamic config updated");
             } catch (err) {
                 logger.error("Failed to write traefik dynamic config:", err);
+                return false;
             }
         }
+        return true;
     }
+    /**
+     * Replace inline PEM entries in tls.options[*].clientAuth.caFiles with
+     * paths to files in the certificates directory. Files are named by a
+     * hash of their content so a changed CA gets a new path, which changes
+     * the dynamic config and makes Traefik reload it. Returns the set of
+     * file paths the config now references.
+     */
+    private writeMtlsCaFiles(traefikConfig: any): Set<string> {
+        const referenced = new Set<string>();
+        const tlsOptions = traefikConfig?.tls?.options;
+        if (!tlsOptions) {
+            return referenced;
+        }
+
+        const certsPath = config.getRawConfig().traefik.certificates_path;
+
+        for (const [optionsName, options] of Object.entries<any>(
+            tlsOptions
+        )) {
+            const caFiles = options?.clientAuth?.caFiles;
+            if (!Array.isArray(caFiles)) continue;
+
+            const paths: string[] = [];
+            for (const pem of caFiles) {
+                if (typeof pem !== "string" || !pem.includes("-----BEGIN")) {
+                    // Already a file path (or not something we can handle)
+                    paths.push(pem);
+                    continue;
+                }
+
+                const hash = createHash("sha256")
+                    .update(pem)
+                    .digest("hex")
+                    .slice(0, 32);
+                const caPath = path.join(
+                    certsPath,
+                    `${MTLS_CA_FILE_PREFIX}${hash}.pem`
+                );
+                try {
+                    if (!fs.existsSync(caPath)) {
+                        this.atomicWriteFileSync(caPath, pem, 0o644);
+                        logger.info(
+                            `Wrote mTLS CA file for TLS options ${optionsName}`
+                        );
+                    }
+                    paths.push(caPath);
+                    referenced.add(caPath);
+                } catch (err) {
+                    logger.error(
+                        `Failed to write mTLS CA file for TLS options ${optionsName}, falling back to inline PEM:`,
+                        err
+                    );
+                    paths.push(pem);
+                }
+            }
+
+            options.clientAuth.caFiles = paths;
+        }
+
+        return referenced;
+    }
+
+    /**
+     * Remove mTLS CA files from the certificates directory that the current
+     * config no longer references
+     */
+    private cleanupUnusedMtlsCaFiles(referenced: Set<string>): void {
+        const certsPath = config.getRawConfig().traefik.certificates_path;
+        try {
+            if (!fs.existsSync(certsPath)) return;
+
+            for (const dirent of fs.readdirSync(certsPath, {
+                withFileTypes: true
+            })) {
+                if (
+                    !dirent.isFile() ||
+                    !dirent.name.startsWith(MTLS_CA_FILE_PREFIX) ||
+                    !dirent.name.endsWith(".pem")
+                ) {
+                    continue;
+                }
+                const filePath = path.join(certsPath, dirent.name);
+                if (!referenced.has(filePath)) {
+                    fs.rmSync(filePath, { force: true });
+                    logger.info(`Removed unused mTLS CA file ${dirent.name}`);
+                }
+            }
+        } catch (error) {
+            logger.error("Error cleaning up mTLS CA files:", error);
+        }
+    }
+
 
     /**
      * Update dynamic config from existing local certificates without fetching from remote
@@ -749,7 +860,7 @@ export class TraefikConfigManager {
         // Only write the config if it has changed
         const newConfigYaml = yaml.dump(dynamicConfig, { noRefs: true });
         if (newConfigYaml !== originalConfigYaml) {
-            fs.writeFileSync(dynamicConfigPath, newConfigYaml, "utf8");
+            this.atomicWriteFileSync(dynamicConfigPath, newConfigYaml);
             logger.info("Dynamic cert config updated from local certificates");
         }
     }
@@ -822,26 +933,23 @@ export class TraefikConfigManager {
                         `Processing certificate for domain: ${cert.domain}`
                     );
 
-                    fs.writeFileSync(certPath, cert.certFile, "utf8");
-                    fs.writeFileSync(keyPath, cert.keyFile, "utf8");
-
-                    // Set appropriate permissions (readable by owner only for key file)
-                    fs.chmodSync(certPath, 0o644);
-                    fs.chmodSync(keyPath, 0o600);
+                    // Write atomically (temp file + rename) so Traefik's
+                    // file watcher never observes a partially written
+                    // cert/key and fails with "failed to find any PEM data".
+                    this.atomicWriteFileSync(certPath, cert.certFile, 0o644);
+                    this.atomicWriteFileSync(keyPath, cert.keyFile, 0o600);
 
                     // Write/update .last_update file with current timestamp
-                    fs.writeFileSync(
+                    this.atomicWriteFileSync(
                         lastUpdatePath,
-                        new Date().toISOString(),
-                        "utf8"
+                        new Date().toISOString()
                     );
 
                     // Check if this is a wildcard certificate and store it
                     const wildcardPath = path.join(domainDir, ".wildcard");
-                    fs.writeFileSync(
+                    this.atomicWriteFileSync(
                         wildcardPath,
-                        cert.wildcard ? "true" : "false",
-                        "utf8"
+                        cert.wildcard ? "true" : "false"
                     );
 
                     logger.info(
@@ -855,10 +963,9 @@ export class TraefikConfigManager {
                 // even if the cert content didn't change
                 if (cert.expiresAt) {
                     const expiresAtPath = path.join(domainDir, ".expires_at");
-                    fs.writeFileSync(
+                    this.atomicWriteFileSync(
                         expiresAtPath,
-                        cert.expiresAt.toString(),
-                        "utf8"
+                        cert.expiresAt.toString()
                     );
                 }
 
@@ -894,7 +1001,7 @@ export class TraefikConfigManager {
         // Only write the config if it has changed
         const newConfigYaml = yaml.dump(dynamicConfig, { noRefs: true });
         if (newConfigYaml !== originalConfigYaml) {
-            fs.writeFileSync(dynamicConfigPath, newConfigYaml, "utf8");
+            this.atomicWriteFileSync(dynamicConfigPath, newConfigYaml);
             logger.info("Dynamic cert config updated");
         }
     }
@@ -1003,43 +1110,71 @@ export class TraefikConfigManager {
 
                 const dirName = dirent.name;
                 // Only delete if NO current domain is exactly the same or ends with `.${dirName}`
-                const shouldDelete = !Array.from(currentActiveDomains).some(
+                const isUnused = !Array.from(currentActiveDomains).some(
                     (domain) =>
                         domain === dirName || domain.endsWith(`.${dirName}`)
                 );
 
-                if (shouldDelete) {
-                    const domainDir = path.join(certsPath, dirName);
-                    logger.info(
-                        `Cleaning up unused certificate directory: ${dirName}`
-                    );
-                    fs.rmSync(domainDir, { recursive: true, force: true });
-
-                    // Remove from local state tracking
-                    this.lastLocalCertificateState.delete(dirName);
-
-                    // Remove from dynamic config
-                    const certFilePath = path.join(domainDir, "cert.pem");
-                    const keyFilePath = path.join(domainDir, "key.pem");
-                    const before = dynamicConfig.tls.certificates.length;
-                    dynamicConfig.tls.certificates =
-                        dynamicConfig.tls.certificates.filter(
-                            (entry: any) =>
-                                entry.certFile !== certFilePath &&
-                                entry.keyFile !== keyFilePath
+                if (!isUnused) {
+                    // Domain is still active - remove from pending deletion if it was queued
+                    if (this.pendingDeletion.has(dirName)) {
+                        logger.info(
+                            `Certificate ${dirName} is active again, cancelling pending deletion`
                         );
-                    if (dynamicConfig.tls.certificates.length !== before) {
-                        configChanged = true;
+                        this.pendingDeletion.delete(dirName);
+                    }
+                    continue;
+                }
+
+                // Domain is unused - add to pending deletion or decrement its counter
+                if (!this.pendingDeletion.has(dirName)) {
+                    const graceCycles = 3;
+                    logger.info(
+                        `Certificate ${dirName} is no longer in use. Will delete after ${graceCycles} more cycles.`
+                    );
+                    this.pendingDeletion.set(dirName, graceCycles);
+                } else {
+                    const remaining = this.pendingDeletion.get(dirName)! - 1;
+                    if (remaining > 0) {
+                        logger.info(
+                            `Certificate ${dirName} pending deletion: ${remaining} cycle(s) remaining`
+                        );
+                        this.pendingDeletion.set(dirName, remaining);
+                    } else {
+                        // Grace period expired - actually delete now
+                        this.pendingDeletion.delete(dirName);
+
+                        const domainDir = path.join(certsPath, dirName);
+                        logger.info(
+                            `Cleaning up unused certificate directory: ${dirName}`
+                        );
+                        fs.rmSync(domainDir, { recursive: true, force: true });
+
+                        // Remove from local state tracking
+                        this.lastLocalCertificateState.delete(dirName);
+
+                        // Remove from dynamic config
+                        const certFilePath = path.join(domainDir, "cert.pem");
+                        const keyFilePath = path.join(domainDir, "key.pem");
+                        const before = dynamicConfig.tls.certificates.length;
+                        dynamicConfig.tls.certificates =
+                            dynamicConfig.tls.certificates.filter(
+                                (entry: any) =>
+                                    entry.certFile !== certFilePath &&
+                                    entry.keyFile !== keyFilePath
+                            );
+                        if (dynamicConfig.tls.certificates.length !== before) {
+                            configChanged = true;
+                        }
                     }
                 }
             }
 
             if (configChanged) {
                 try {
-                    fs.writeFileSync(
+                    this.atomicWriteFileSync(
                         dynamicConfigPath,
-                        yaml.dump(dynamicConfig, { noRefs: true }),
-                        "utf8"
+                        yaml.dump(dynamicConfig, { noRefs: true })
                     );
                     logger.info("Dynamic config updated after cleanup");
                 } catch (err) {
@@ -1062,6 +1197,36 @@ export class TraefikConfigManager {
             fs.mkdirSync(dirPath, { recursive: true });
         } catch (error) {
             logger.error(`Error creating directory ${dirPath}:`, error);
+            throw error;
+        }
+    }
+
+    /**
+     * Write a file atomically by writing to a temp file in the same
+     * directory and renaming it into place. This avoids Traefik (which
+     * watches these files/directories) picking up a partially written
+     * file and failing to parse it (e.g. "failed to find any PEM data").
+     */
+    private atomicWriteFileSync(
+        filePath: string,
+        data: string,
+        mode?: number
+    ): void {
+        const dir = path.dirname(filePath);
+        const tmpPath = path.join(
+            dir,
+            `.${path.basename(filePath)}.tmp-${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`
+        );
+        try {
+            fs.writeFileSync(tmpPath, data, "utf8");
+            if (mode !== undefined) {
+                fs.chmodSync(tmpPath, mode);
+            }
+            fs.renameSync(tmpPath, filePath);
+        } catch (error) {
+            try {
+                fs.rmSync(tmpPath, { force: true });
+            } catch {}
             throw error;
         }
     }
