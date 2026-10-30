@@ -13,6 +13,7 @@ import {
     getUserResourceAccess,
     getOrgLoginPage,
     getUserSessionWithUser,
+    revalidateIdpSession,
     checkOrgAccessPolicy
 } from "@server/routers/ws/verifySessionQueries";
 import { matchesPath } from "@server/lib/traefik/rule";
@@ -1298,6 +1299,10 @@ async function isUserAllowedToAccessResource(
     resource: Resource,
     org: Org
 ): Promise<BasicUserData | null> {
+    if (!(await revalidateIdpSession(userSessionId))) {
+        return null;
+    }
+
     const result = await getUserSessionWithUser(userSessionId);
 
     if (!result) {

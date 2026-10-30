@@ -131,6 +131,36 @@ export async function getUserSessionWithUser(
 }
 
 /**
+ * Revalidate the user session with its IdP. Fails open so an unreachable
+ * server or one without this endpoint does not log out every user.
+ */
+export async function revalidateIdpSession(
+    userSessionId: string
+): Promise<boolean> {
+    try {
+        const response = await axios.get(
+            `${config.getRawConfig().managed?.endpoint}/api/v1/hybrid/session/${userSessionId}/revalidate`,
+            await tokenManager.getAuthHeader()
+        );
+        return response.data.data?.valid !== false;
+    } catch (error) {
+        if (axios.isAxiosError(error)) {
+            logger.error("Error revalidating session in verify session:", {
+                message: error.message,
+                code: error.code,
+                status: error.response?.status,
+                statusText: error.response?.statusText,
+                url: error.config?.url,
+                method: error.config?.method
+            });
+        } else {
+            logger.error("Error revalidating session in verify session:", error);
+        }
+        return true;
+    }
+}
+
+/**
  * Get all role IDs a user has in an organization
  */
 export async function getUserOrgRoleIds(
