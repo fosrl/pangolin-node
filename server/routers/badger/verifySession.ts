@@ -1,6 +1,7 @@
 import {
     validateResourceSessionToken,
-    createAccessTokenResourceSession
+    createAccessTokenResourceSession,
+    type SessionClientInfo
 } from "@server/auth/sessions/resource";
 import {
     type RedirectByHost,
@@ -662,7 +663,10 @@ export async function verifyResourceSession(
                             reason: 104, // valid pincode
                             resourceId: resource.resourceId,
                             orgId: resource.orgId,
-                            location: ipCC
+                            location: ipCC,
+                            metadata: {
+                                resourceSessionId: resourceSession.sessionId
+                            }
                         },
                         parsedBody.data
                     );
@@ -685,7 +689,10 @@ export async function verifyResourceSession(
                             reason: 105, // valid password
                             resourceId: resource.resourceId,
                             orgId: resource.orgId,
-                            location: ipCC
+                            location: ipCC,
+                            metadata: {
+                                resourceSessionId: resourceSession.sessionId
+                            }
                         },
                         parsedBody.data
                     );
@@ -713,7 +720,10 @@ export async function verifyResourceSession(
                             reason: 106, // valid email
                             resourceId: resource.resourceId,
                             orgId: resource.orgId,
-                            location: ipCC
+                            location: ipCC,
+                            metadata: {
+                                resourceSessionId: resourceSession.sessionId
+                            }
                         },
                         parsedBody.data
                     );
@@ -750,7 +760,8 @@ export async function verifyResourceSession(
                                 location: ipCC,
                                 accessTokenId: resourceSession.accessTokenId,
                                 tokenTitle: tokenItem.title ?? null,
-                                userData
+                                userData,
+                                resourceSessionId: resourceSession.sessionId
                             },
                             parsedBody.data
                         );
@@ -804,6 +815,9 @@ export async function verifyResourceSession(
                                 user: {
                                     username: allowedUserData.username,
                                     userId: allowedUserData.userId
+                                },
+                                metadata: {
+                                    resourceSessionId: resourceSession.sessionId
                                 }
                             },
                             parsedBody.data
@@ -1074,19 +1088,17 @@ async function allowAccessToken(
     location?: string,
     userData?: AccessTokenUserData
 ) {
-    logAccessTokenRequestAudit(
-        {
-            resourceId: resource.resourceId,
-            orgId: resource.orgId,
-            location,
-            accessTokenId: tokenItem.accessTokenId,
-            tokenTitle: tokenItem.title,
-            userData
-        },
-        auditBody
-    );
+    const auditData = {
+        resourceId: resource.resourceId,
+        orgId: resource.orgId,
+        location,
+        accessTokenId: tokenItem.accessTokenId,
+        tokenTitle: tokenItem.title,
+        userData
+    };
 
     if (!tokenItem.persistSession) {
+        logAccessTokenRequestAudit(auditData, auditBody);
         logAccessTokenAccessAudit(tokenItem, resource, userData, auditBody);
         return allowed(
             res,
@@ -1124,6 +1136,10 @@ async function allowAccessToken(
             logger.debug(
                 "Resource allowed because existing access token session is valid"
             );
+            logAccessTokenRequestAudit(
+                { ...auditData, resourceSessionId: resourceSession.sessionId },
+                auditBody
+            );
             return allowed(
                 res,
                 forwardedUserData(resource, userData),
@@ -1132,31 +1148,51 @@ async function allowAccessToken(
         }
     }
 
-    logAccessTokenAccessAudit(tokenItem, resource, userData, auditBody);
-    return await createAccessTokenSession(res, resource, tokenItem, userData);
+    const sessionId = await createAccessTokenSession(res, resource, tokenItem, {
+        ip: auditBody.requestIp
+            ? stripPortFromHost(auditBody.requestIp, auditBody.badgerVersion)
+            : null,
+        userAgent: getClientHeader(auditBody.headers, "user-agent"),
+        countryCode: location
+    });
+    logAccessTokenRequestAudit(
+        { ...auditData, resourceSessionId: sessionId },
+        auditBody
+    );
+    logAccessTokenAccessAudit(
+        tokenItem,
+        resource,
+        userData,
+        auditBody,
+        sessionId
+    );
+    return allowed(res, forwardedUserData(resource, userData));
 }
 
+// Sets the session cookie on the response and returns the new session's id;
+// the caller sends the response.
 async function createAccessTokenSession(
     res: Response,
     resource: Resource,
     tokenItem: ResourceAccessToken,
-    userData?: BasicUserData
-) {
-    const cookie = await createAccessTokenResourceSession(
+    clientInfo: SessionClientInfo
+): Promise<string | undefined> {
+    const sess = await createAccessTokenResourceSession(
         resource.resourceId,
-        tokenItem.accessTokenId
+        tokenItem.accessTokenId,
+        clientInfo
     );
 
-    if (cookie) {
-        res.appendHeader("Set-Cookie", cookie);
-        logger.debug("Access token is valid, creating new session");
-    } else {
+    if (!sess) {
         logger.error(
             "Failed to create access token session via hybrid endpoint"
         );
+        return undefined;
     }
 
-    return allowed(res, forwardedUserData(resource, userData));
+    res.appendHeader("Set-Cookie", sess.cookie);
+    logger.debug("Access token is valid, creating new session");
+    return sess.sessionId ?? undefined;
 }
 
 function logAccessTokenRequestAudit(
@@ -1167,6 +1203,7 @@ function logAccessTokenRequestAudit(
         accessTokenId: string;
         tokenTitle: string | null;
         userData?: BasicUserData;
+        resourceSessionId?: string;
     },
     body: VerifyResourceSessionSchema
 ) {
@@ -1184,7 +1221,8 @@ function logAccessTokenRequestAudit(
                 },
                 metadata: {
                     accessTokenId: data.accessTokenId,
-                    accessTokenTitle: data.tokenTitle
+                    accessTokenTitle: data.tokenTitle,
+                    resourceSessionId: data.resourceSessionId
                 }
             },
             body
@@ -1202,7 +1240,10 @@ function logAccessTokenRequestAudit(
             apiKey: {
                 name: data.tokenTitle,
                 apiKeyId: data.accessTokenId
-            }
+            },
+            metadata: data.resourceSessionId
+                ? { resourceSessionId: data.resourceSessionId }
+                : undefined
         },
         body
     );
@@ -1212,7 +1253,8 @@ function logAccessTokenAccessAudit(
     tokenItem: ResourceAccessToken,
     resource: Resource,
     userData: BasicUserData | undefined,
-    body: VerifyResourceSessionSchema
+    body: VerifyResourceSessionSchema,
+    resourceSessionId?: string
 ) {
     const userAgent =
         body.headers?.["user-agent"] || body.headers?.["User-Agent"];
@@ -1229,7 +1271,8 @@ function logAccessTokenAccessAudit(
             },
             metadata: {
                 accessTokenId: tokenItem.accessTokenId,
-                accessTokenTitle: tokenItem.title
+                accessTokenTitle: tokenItem.title,
+                resourceSessionId
             },
             userAgent,
             requestIp: body.requestIp
@@ -1246,6 +1289,7 @@ function logAccessTokenAccessAudit(
             name: tokenItem.title,
             apiKeyId: tokenItem.accessTokenId
         },
+        metadata: resourceSessionId ? { resourceSessionId } : undefined,
         userAgent,
         requestIp: body.requestIp
     });

@@ -40,19 +40,39 @@ export async function validateResourceSessionToken(
     }
 }
 
+// Details about the client that created a session, shown to admins when
+// reviewing active sessions. The managed endpoint looks up whatever is left out.
+export type SessionClientInfo = {
+    ip?: string | null;
+    userAgent?: string | null;
+    countryCode?: string | null;
+    asn?: number | null;
+};
+
+export type CreatedAccessTokenSession = {
+    cookie: string;
+    sessionId: string | null;
+};
+
 export async function createAccessTokenResourceSession(
     resourceId: number,
-    accessTokenId: string
-): Promise<string | null> {
+    accessTokenId: string,
+    clientInfo?: SessionClientInfo
+): Promise<CreatedAccessTokenSession | null> {
     try {
         const response = await axios.post(
             `${config.getRawConfig().managed?.endpoint}/api/v1/hybrid/resource/${resourceId}/session/create-access-token`,
             {
-                accessTokenId
+                accessTokenId,
+                clientInfo
             },
             await tokenManager.getAuthHeader()
         );
-        return response.data.data?.cookie ?? null;
+        const cookie = response.data.data?.cookie;
+        if (!cookie) {
+            return null;
+        }
+        return { cookie, sessionId: response.data.data?.sessionId ?? null };
     } catch (error) {
         if (axios.isAxiosError(error)) {
             logger.error(
