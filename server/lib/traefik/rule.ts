@@ -39,3 +39,30 @@ export function matchesPath(
     }
     return true;
 }
+
+// The two HostRegexp patterns Pangolin's buildHostRule emits for wildcard
+// resources, capturing the escaped domain the wildcard sits under:
+// `^[^.]+\.parent$`, and `^([^.]+\.)?parent$` when the base host matches too.
+const WILDCARD_HOST_PATTERN = /^\^(?:\[\^\.\]\+\\\.|\(\[\^\.\]\+\\\.\)\?)(.+)\$$/;
+
+/**
+ * The domains a router rule needs a certificate for. A wildcard rule maps
+ * back to `*.parent`; when it also matches the base host, no separate entry
+ * is needed because the wildcard certificate carries the base name as a SAN.
+ */
+export function domainsFromHostRule(rule: string): string[] {
+    const domains: string[] = [];
+
+    const host = rule.match(/Host\(`([^`]+)`\)/);
+    if (host?.[1]) {
+        domains.push(host[1]);
+    }
+
+    const hostRegexp = rule.match(/HostRegexp\(`([^`]+)`\)/);
+    const parent = hostRegexp?.[1]?.match(WILDCARD_HOST_PATTERN)?.[1];
+    if (parent) {
+        domains.push(`*.${parent.replace(/\\\./g, ".")}`);
+    }
+
+    return domains;
+}
