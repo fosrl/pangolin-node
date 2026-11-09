@@ -54,10 +54,22 @@ import { APP_VERSION } from "@server/lib/consts";
 import { enforceResourceSessionLength } from "@server/lib/checkOrgAccessPolicy";
 import { REGIONS } from "@server/db/regions";
 import { isPathAllowed } from "@server/lib/pathMatch";
+import { ipKeyGenerator, type Options } from "express-rate-limit";
+import { createStore } from "@server/lib/rateLimitStore";
 
 const APP_VERSION_PREPEND = `remote-${APP_VERSION}`;
 
 const localCache = createLocalCache();
+
+// Limit failed HTTP Basic (header auth) attempts per client IP and resource,
+// matching the limits on /resource/:resourceId/password and /pincode.
+const HEADER_AUTH_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const HEADER_AUTH_RATE_LIMIT_MAX = 15;
+const headerAuthRateLimitStore = createStore();
+headerAuthRateLimitStore.init?.({
+    windowMs: HEADER_AUTH_RATE_LIMIT_WINDOW_MS,
+    max: HEADER_AUTH_RATE_LIMIT_MAX
+} as Options);
 
 const verifyResourceSessionSchema = z.object({
     sessions: z.record(z.string(), z.string()).optional(),
@@ -487,12 +499,30 @@ export async function verifyResourceSession(
                 );
 
                 return allowed(res, undefined, dontStripSession);
+            }
+
+            // Count the attempt before hashing so concurrent guesses can't
+            // slip past the limit; successful attempts are refunded below.
+            const rateLimitKey = `headerAuth:${ipKeyGenerator(clientIp || "unknown")}:${resource.resourceId}`;
+            const { totalHits } =
+                await headerAuthRateLimitStore.increment(rateLimitKey);
+            const rateLimited = totalHits > HEADER_AUTH_RATE_LIMIT_MAX;
+
+            if (rateLimited) {
+                if (config.getRawConfig().app.log_failed_attempts) {
+                    logger.info(
+                        `Header auth rate limit exceeded. Resource ID: ${
+                            resource.resourceId
+                        }. IP: ${clientIp}.`
+                    );
+                }
             } else if (
                 await verifyPassword(
                     clientHeaderAuth,
                     headerAuth.headerAuthHash
                 )
             ) {
+                await headerAuthRateLimitStore.decrement(rateLimitKey);
                 localCache.set(clientHeaderAuthKey, clientHeaderAuth, 5);
                 logger.debug("Resource allowed because header auth is valid");
 
